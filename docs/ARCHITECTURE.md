@@ -1,7 +1,7 @@
 # Trading Pro - Architecture Documentation
 
-**Version**: 4.1.0 (Modular Architecture)
-**Last Updated**: November 30, 2025
+**Version**: 4.2.0 (Modular Architecture)
+**Last Updated**: January 26, 2026
 **Status**: ✅ Production Ready
 
 ## Overview
@@ -192,7 +192,7 @@ Application Startup
     ↓
 ModuleRegistry.auto_discover() + ProviderRegistry.auto_discover()
     ↓
-AppFactory._resolve_capabilities() (static analysis)
+ModuleRegistry.required_capabilities() (static analysis)
     ↓
 ProviderRegistry.get_providers(required_capabilities)
     ↓
@@ -275,17 +275,17 @@ Backend modules follow **microservice principles** within a modular monorepo, en
 
 **Five Core Rules:**
 
-| Rule                    | Principle                                | Rationale                                  |
-| ----------------------- | ---------------------------------------- | ------------------------------------------ |
-| **1. Modular Monorepo** | Each module = potential microservice     | Easy extraction for independent deployment |
-| **2. Statelessness**    | No shared mutable state between requests | Enables horizontal scaling                 |
-| **3. Data Ownership**   | Each module owns its data domain         | No cross-module database access            |
-| **4. Communication**    | Module → Provider callbacks only         | No direct inter-module imports             |
-| **5. Aggregation**      | Frontend aggregates, backend isolates    | UI orchestrates, modules stay focused      |
+| Rule                    | Principle                                | Rationale                                                  |
+| ----------------------- | ---------------------------------------- | ---------------------------------------------------------- |
+| **1. Modular Monorepo** | Each module = potential microservice     | Easy extraction for independent deployment                 |
+| **2. Statelessness**    | No shared mutable state between requests | Enables horizontal scaling                                 |
+| **3. Data Ownership**   | Each module owns its data domain         | No cross-module database access; uses `DatastoreInterface` |
+| **4. Communication**    | Module → Provider callbacks only         | No direct inter-module imports                             |
+| **5. Aggregation**      | Frontend aggregates, backend isolates    | UI orchestrates, modules stay focused                      |
 
 **Key Enforcement Patterns:**
 
-- **Repository Pattern**: Each module has own data access layer (`Repository[T]`)
+- **Repository Pattern**: Each module has own data access layer (`Repository[T]`) with `DatastoreInterface` injection for per-table RWLock concurrency
 - **Provider Callbacks**: Shared concerns via capability injection, not imports
 - **Stateless Services**: No instance variables storing request-scoped data
 - **Test Isolation**: Module tests create isolated app with only that module
@@ -399,7 +399,7 @@ AsyncAPI Spec → Custom Type Extractor → TypeScript Interfaces
 **Process**:
 
 ```
-Module.gen_module_specs_and_clients()
+Module.code_gen()
     ├─→ Generate module OpenAPI spec
     │   └─→ modules/{module_name}/specs_generated/openapi.json
     ├─→ Generate module AsyncAPI spec (if WebSocket routes exist)
@@ -1129,12 +1129,12 @@ Services declare what they need → ProviderRegistry finds implementations → A
 
 ```python
 @dataclass(frozen=True)
-class CapabilitySpec:
+class ProviderCapabilitySpec:
     """Type-safe capability declaration."""
-    name: CapabilityName  # "auth", "broker", "datafeed"
+    name: ProviderCapabilityName  # "auth", "broker", "datafeed"
     version: str | None = None  # None = any version
 
-    def matches(self, provider_capability: CapabilitySpec) -> bool:
+    def matches(self, provider_capability: ProviderCapabilitySpec) -> bool:
         """Check if provider satisfies requirement."""
 ```
 
@@ -1195,7 +1195,7 @@ Application Startup (AppFactory.create_app)
     ↓
 2. ProviderRegistry.auto_discover() - Find all providers
     ↓
-3. AppFactory._resolve_capabilities() - Static analysis of service requirements
+3. ModuleRegistry.required_capabilities() - Static analysis of service requirements
     ↓
 4. ProviderRegistry.get_providers() - Lazy-load matching providers
     ↓
@@ -1401,7 +1401,8 @@ async def test_provider_injection():
     app = await factory.create_app(enabled_module_names=["auth"])
 
     # Verify provider was injected
-    auth_module = factory.module_registry.get_module("auth")
+    auth_modules = factory.module_registry.get_modules(module_names=["auth"])
+    auth_module = auth_modules[0]
     assert isinstance(auth_module.service._providers[0], GoogleProvider)
 ```
 

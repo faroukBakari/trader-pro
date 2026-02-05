@@ -20,6 +20,8 @@ Architecture:
 - Used via composition by TWSProvider
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -27,14 +29,13 @@ import select
 import struct
 import threading
 import time
-from collections.abc import Callable, Coroutine
 from decimal import Decimal
 from itertools import count
 from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ibapi.commission_and_fees_report import CommissionAndFeesReport
 from ibapi.common import PROTOBUF_MSG_ID, BarData, TickAttrib
@@ -44,6 +45,10 @@ from ibapi.decoder import Decoder
 from ibapi.execution import Execution
 from ibapi.message import OUT
 from ibapi.order import Order
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
 from ibapi.order_state import OrderState
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum
@@ -596,7 +601,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
     # === Trading / account management ===
 
     def managedAccounts(self, accountsList: str) -> None:
-        if DEBUG_TWS_ACCOUNT:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # should be sent upon connection - route to wired AccountTracker
         assert (
@@ -622,7 +627,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             value: Tag value as string
             currency: Currency of the value
         """
-        if DEBUG_TWS_ACCOUNT:
+        if DEBUG_TWS_DISPATCH:
             debug_log(
                 f"{current_fn_name()}, reqId={reqId}, account={account}, "
                 f"tag={tag}, value={value}, currency={currency}"
@@ -637,7 +642,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         Called after all accountSummary callbacks for reqAccountSummary().
         Resolves the pending future with accumulated summary data.
         """
-        if DEBUG_TWS_ACCOUNT:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}")
 
         # Mark snapshot complete and resolve pending futures
@@ -660,7 +665,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             currency: Currency of the value (may be empty)
             accountName: Account ID
         """
-        if DEBUG_TWS_ACCOUNT:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}: {key}={val} {currency} for {accountName}")
 
         if self.__account_tracker is not None:
@@ -692,7 +697,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             realizedPNL: Realized P&L for this position
             accountName: Account ID
         """
-        if DEBUG_TWS_ACCOUNT:
+        if DEBUG_TWS_DISPATCH:
             debug_log(
                 f"{current_fn_name()}: {contract.symbol} pos={position} "
                 f"unrealPnL={unrealizedPNL} for {accountName}"
@@ -708,7 +713,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         Args:
             timeStamp: Time string from TWS
         """
-        if DEBUG_TWS_ACCOUNT:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}: {timeStamp}")
 
         if self.__account_tracker is not None:
@@ -723,7 +728,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         Args:
             accountName: Account ID for which download completed
         """
-        if DEBUG_TWS_ACCOUNT:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}: {accountName}")
 
         if self.__account_tracker is not None:
@@ -745,7 +750,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             unrealizedPnL: Unrealized P&L across all positions
             realizedPnL: Realized P&L across all positions
         """
-        if DEBUG_TWS_ACCOUNT:
+        if DEBUG_TWS_DISPATCH:
             debug_log(
                 f"{current_fn_name()}: reqId={reqId} daily={dailyPnL} "
                 f"unrealized={unrealizedPnL} realized={realizedPnL}"
@@ -760,7 +765,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
     def symbolSamples(
         self, reqId: int, contractDescriptions: list[ContractDescription]
     ) -> None:
-        if DEBUG_TWS_SHARED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         # Route to ContractTracker via wired interface
@@ -775,7 +780,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         TWS sends one contractDetails callback per matching contract.
         Results are accumulated until contractDetailsEnd is called.
         """
-        if DEBUG_TWS_SHARED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         # Route to ContractTracker via wired interface
@@ -784,7 +789,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
 
     def contractDetailsEnd(self, reqId: int) -> None:
         """End signal for contract details - resolve Future with accumulated results."""
-        if DEBUG_TWS_SHARED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         # Route to ContractTracker via wired interface
@@ -799,18 +804,30 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         TWS sends one historicalData callback per bar.
         Results are accumulated until historicalDataEnd is called.
         """
+
+        if DEBUG_TWS_DISPATCH:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
         # Route to BarsTracker via wired interface
         if self.__bars_tracker is not None:
             self.__bars_tracker.update(reqId, bar)
 
     def historicalDataUpdate(self, reqId: int, bar: BarData) -> None:
         """Returns updates in real time when keepUpToDate is set to True."""
+
+        if DEBUG_TWS_DISPATCH:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
         # Route to BarsTracker via wired interface
         if self.__bars_tracker is not None:
             self.__bars_tracker.update(reqId, bar)
 
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
         """End signal for historical data - resolve Future with accumulated results."""
+
+        if DEBUG_TWS_DISPATCH:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
         # Route to BarsTracker via wired interface
         if self.__bars_tracker is not None:
             self.__bars_tracker.flag_complete(reqId, start, end)
@@ -822,7 +839,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
     ) -> None:
         """Accumulate price ticks for market data snapshot."""
 
-        if DEBUG_TWS_DATAFEED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         tick_name = get_tick_type_name(tickType)
@@ -836,7 +853,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
         """Accumulate size ticks for market data snapshot."""
 
-        if DEBUG_TWS_DATAFEED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         tick_name = get_tick_type_name(tickType)
@@ -848,7 +865,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
 
     def marketDataType(self, reqId: int, marketDataType: int) -> None:
         """Set market data type for the request."""
-        if DEBUG_TWS_DATAFEED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         if self.__quote_tracker is not None:
@@ -859,7 +876,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
     ) -> None:
         """Returns exchange map of a particular contract."""
 
-        if DEBUG_TWS_DATAFEED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         if self.__quote_tracker is not None:
@@ -874,7 +891,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
 
     def tickString(self, reqId: int, tickType: int, value: str) -> None:
         """Generic string tick for market data snapshot."""
-        if DEBUG_TWS_DATAFEED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         tick_name = get_tick_type_name(tickType)
@@ -887,7 +904,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
 
     def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
         """Generic float tick for market data snapshot."""
-        if DEBUG_TWS_DATAFEED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         tick_name = get_tick_type_name(tickType)
@@ -902,7 +919,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         """When requesting market data snapshots, this market will indicate the
         snapshot reception is finished."""
 
-        if DEBUG_TWS_DATAFEED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         if self.__quote_tracker is not None:
@@ -911,7 +928,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
     # === Order management ===
 
     def nextValidId(self, orderId: int) -> None:
-        if DEBUG_TWS_SHARED:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # Signals connection fully established - safe to make requests
         assert (
@@ -940,7 +957,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             order: Order parameters (type, qty, price, etc.)
             orderState: Current order state (status, margin, commission)
         """
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_DISPATCH:
             debug_log(
                 f"{current_fn_name()}, orderId={orderId}, "
                 f"symbol={contract.symbol}, status={orderState.status}"
@@ -988,7 +1005,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             whyHeld: Reason order is held (if applicable)
             mktCapPrice: Market cap price (for auction orders)
         """
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_DISPATCH:
             debug_log(
                 f"{current_fn_name()}, orderId={orderId}, status={status}, "
                 f"filled={filled}, remaining={remaining}, avgFillPrice={avgFillPrice}"
@@ -1016,7 +1033,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         Called after all openOrder callbacks for reqOpenOrders().
         Marks snapshot as complete and resolves pending futures.
         """
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}")
 
         # Mark snapshot complete and resolve pending futures
@@ -1038,7 +1055,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             position: Position size (positive=long, negative=short)
             avgCost: Average cost per unit
         """
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_DISPATCH:
             debug_log(
                 f"{current_fn_name()}, account={account}, "
                 f"symbol={contract.symbol}, position={position}, avgCost={avgCost}"
@@ -1059,7 +1076,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         Called after all position callbacks for reqPositions().
         Resolves the pending future with accumulated position data.
         """
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}")
 
         # Mark snapshot complete and resolve pending futures
@@ -1083,7 +1100,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             contract: Contract the execution is for
             execution: Execution details (execId, price, shares, side, time)
         """
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_DISPATCH:
             debug_log(
                 f"{current_fn_name()}, reqId={reqId}, "
                 f"execId={execution.execId}, symbol={contract.symbol}, "
@@ -1103,7 +1120,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         Args:
             reqId: Request ID from reqExecutions()
         """
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_DISPATCH:
             debug_log(f"{current_fn_name()}, reqId={reqId}")
 
         if self.__execution_tracker is not None:
@@ -1124,7 +1141,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         Args:
             commissionAndFeesReport: Commission report linked by execId
         """
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_DISPATCH:
             debug_log(
                 f"{current_fn_name()}, execId={commissionAndFeesReport.execId}, "
                 f"commission={commissionAndFeesReport.commissionAndFees}, "

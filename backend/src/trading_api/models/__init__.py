@@ -23,7 +23,6 @@ from .auth import (
     User,
     UserCreate,
     UserData,
-    UserInDB,
 )
 
 # Import from broker domain
@@ -81,12 +80,14 @@ from .health import HealthResponse
 from .market import (
     Bar,
     BarsSubscriptionRequest,
+    CoveredRange,
     DatafeedConfiguration,
     DatafeedSymbolType,
     Exchange,
     GetBarsRequest,
     GetBarsResponse,
     GetQuotesRequest,
+    PendingRange,
     QuoteData,
     QuoteDataSubscriptionRequest,
     QuoteValues,
@@ -94,6 +95,7 @@ from .market import (
     SearchSymbolResultItem,
     SearchSymbolsRequest,
     SymbolInfo,
+    TimeRange,
 )
 
 # Import versioning models
@@ -127,7 +129,6 @@ __all__ = [
     "User",
     "UserCreate",
     "UserData",
-    "UserInDB",
     # Market data models
     "Bar",
     "DatafeedConfiguration",
@@ -143,6 +144,10 @@ __all__ = [
     "SearchSymbolResultItem",
     "SearchSymbolsRequest",
     "SymbolInfo",
+    # Cache models
+    "TimeRange",
+    "PendingRange",
+    "CoveredRange",
     # Broker models
     "AccountMetainfo",
     "Brackets",

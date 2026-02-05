@@ -20,6 +20,10 @@ PROVIDERS_DIR = src/trading_api/providers
 DISCOVERED_PROVIDERS = $(shell find $(PROVIDERS_DIR) -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -vE '__pycache__|tests|capabilities' || echo "")
 
 # Provider selection (can be overridden: make test-providers providers=google,tws)
+
+# Dynamic datastore discovery
+DATASTORES_DIR = src/trading_api/datastores
+DISCOVERED_DATASTORES = $(shell find $(DATASTORES_DIR) -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -v __pycache__ || echo "")
 ifdef providers
 	SELECTED_PROVIDERS = $(subst $(comma), ,$(providers))
 else
@@ -28,7 +32,7 @@ endif
 
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api show-cache show-cache-json show-cache-symbol $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-core list-providers list-providers-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS))
+.PHONY: help install install-ci test test-full test-boundaries test-boundaries-full test-modules test-modules-full test-datastores test-datastores-full test-cov test-integration test-integration-full lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api show-cache show-cache-json show-cache-symbol $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-full test-providers-core test-providers-core-full list-providers list-providers-json list-datastores list-datastores-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)) testmon-forcerun testmon-reset testmon-status
 
 # Default target
 help:
@@ -36,14 +40,20 @@ help:
 	@echo "  install           Install backend dependencies (auto-checks Python/Poetry/nginx)"
 	@echo "  install-ci        Install backend dependencies for CI (non-interactive)"
 	@echo ""
-	@echo "Testing targets:"
-	@echo "  test              Run all tests (boundaries + providers + modules + integration)"
-	@echo "  test-boundaries   Validate import boundaries between modules"
-	@echo "  test-providers    Run all provider tests (core + all discovered providers)"
-	@echo "  test-providers-core  Run provider registry/capability tests only"
-	@echo "  test-modules      Run all module tests (use modules=mod1,mod2 to select specific)"
-	@echo "  test-integration  Run integration tests"
-	@echo "  test-cov          Run all tests with coverage"
+	@echo "Testing (default: incremental with testmon, add -full suffix for complete runs):"
+	@echo "  test              Run all tests (incremental)"
+	@echo "  test-full         Run all tests (complete suite)"
+	@echo "  test-boundaries   Validate import boundaries (incremental)"
+	@echo "  test-providers    Run all provider tests (incremental)"
+	@echo "  test-modules      Run module tests (modules=x,y to select)"
+	@echo "  test-datastores   Run all datastore tests (incremental)"
+	@echo "  test-integration  Run integration tests (incremental)"
+	@echo "  test-cov          Run tests with coverage (always full)"
+	@echo ""
+	@echo "Testmon utilities:"
+	@echo "  testmon-forcerun  Force full run + rebuild database"
+	@echo "  testmon-reset     Clear testmon database"
+	@echo "  testmon-status    Show testmon database status"
 	@echo ""
 	@echo "Module-specific test targets (auto-discovered):"
 	@for module in $(DISCOVERED_MODULES); do \
@@ -128,6 +138,17 @@ list-providers:
 # List providers as JSON array (for CI dynamic matrix)
 list-providers-json:
 	@echo '$(DISCOVERED_PROVIDERS)' | tr ' ' '\n' | grep -v '^$$' | jq -R -s -c 'split("\n") | map(select(. != ""))'
+
+# List all discovered datastores
+list-datastores:
+	@echo "📦 Discovered datastores:"
+	@for datastore in $(DISCOVERED_DATASTORES); do \
+		echo "  - $$datastore"; \
+	done
+
+# List datastores as JSON array (for CI dynamic matrix)
+list-datastores-json:
+	@echo '$(DISCOVERED_DATASTORES)' | tr ' ' '\n' | grep -v '^$$' | jq -R -s -c 'split("\n") | map(select(. != ""))'
 
 # Unified generation command
 # Usage: make generate [modules=mod1,mod2] [output_dir=/path/to/output]
@@ -427,17 +448,50 @@ install-ci:
 	@echo "✅ CI installation complete!"
 
 test-boundaries: check-generate-keypair check-generate-hmac-key
-	@echo "Running root-level tests..."
+	@echo "Running root-level tests (incremental)..."
+	@# test_import_boundaries scans files dynamically - testmon can't track dependencies
+	@# Always run it explicitly, then run remaining tests with testmon
+	poetry run pytest tests/test_import_boundaries.py -v $(ARGS)
+	poetry run pytest tests/ -v --testmon --ignore=tests/integration/ --ignore=tests/test_import_boundaries.py $(ARGS)
+
+test-boundaries-full: check-generate-keypair check-generate-hmac-key
+	@echo "Running root-level tests (full)..."
 	poetry run pytest tests/ -v --ignore=tests/integration/ $(ARGS)
 
 # Provider core tests (registry, capability spec)
 test-providers-core: check-generate-keypair check-generate-hmac-key
-	@echo "Running provider core tests..."
+	@echo "Running provider core tests (incremental)..."
+	poetry run pytest src/trading_api/providers/tests/ -v --testmon $(ARGS)
+
+test-providers-core-full: check-generate-keypair check-generate-hmac-key
+	@echo "Running provider core tests (full)..."
 	poetry run pytest src/trading_api/providers/tests/ -v $(ARGS)
 
 # All provider tests (core + all discovered providers)
 test-providers: test-providers-core
-	@echo "Running all provider tests..."
+	@echo "Running all provider tests (incremental)..."
+	@if [ -z "$(SELECTED_PROVIDERS)" ]; then \
+		echo "⚠️  No providers selected or found"; \
+	else \
+		echo "Testing providers: $(SELECTED_PROVIDERS)"; \
+		for provider in $(SELECTED_PROVIDERS); do \
+			if [ -d "$(PROVIDERS_DIR)/$$provider/tests" ]; then \
+				echo "Testing provider: $$provider"; \
+				poetry run pytest --testmon $(PROVIDERS_DIR)/$$provider/tests/ -v -x $(ARGS); \
+				EXIT_CODE=$$?; \
+				if [ $$EXIT_CODE -eq 5 ]; then \
+					echo "⚠️  No tests collected for provider: $$provider (skipping)"; \
+				elif [ $$EXIT_CODE -ne 0 ]; then \
+					exit 1; \
+				fi; \
+			else \
+				echo "⚠️  No tests found for provider: $$provider"; \
+			fi; \
+		done; \
+	fi
+
+test-providers-full: test-providers-core-full
+	@echo "Running all provider tests (full)..."
 	@if [ -z "$(SELECTED_PROVIDERS)" ]; then \
 		echo "⚠️  No providers selected or found"; \
 	else \
@@ -459,7 +513,29 @@ test-providers: test-providers-core
 	fi
 
 test-modules: check-generate-keypair check-generate-hmac-key
-	@echo "Running module tests..."
+	@echo "Running module tests (incremental)..."
+	@if [ -z "$(SELECTED_MODULES)" ]; then \
+		echo "⚠️  No modules selected or found"; \
+	else \
+		echo "Testing modules: $(SELECTED_MODULES)"; \
+		for module in $(SELECTED_MODULES); do \
+			if [ -d "$(MODULES_DIR)/$$module/tests" ]; then \
+				echo "Testing module: $$module"; \
+				poetry run pytest --testmon $(MODULES_DIR)/$$module/tests/ -v -x $(ARGS); \
+				EXIT_CODE=$$?; \
+				if [ $$EXIT_CODE -eq 5 ]; then \
+					echo "⚠️  No tests collected for module: $$module (skipping)"; \
+				elif [ $$EXIT_CODE -ne 0 ]; then \
+					exit 1; \
+				fi; \
+			else \
+				echo "⚠️  No tests found for module: $$module"; \
+			fi; \
+		done; \
+	fi
+
+test-modules-full: check-generate-keypair check-generate-hmac-key
+	@echo "Running module tests (full)..."
 	@if [ -z "$(SELECTED_MODULES)" ]; then \
 		echo "⚠️  No modules selected or found"; \
 	else \
@@ -480,11 +556,11 @@ test-modules: check-generate-keypair check-generate-hmac-key
 		done; \
 	fi
 
-# Individual module tests (auto-generated targets)
+# Individual module tests (auto-generated targets, incremental by default)
 $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
-	@echo "Running tests for module: $*..."
+	@echo "Running tests for module: $* (incremental)..."
 	@if [ -d "$(MODULES_DIR)/$*/tests" ]; then \
-		poetry run pytest $(MODULES_DIR)/$*/tests/ -v -x $(ARGS); \
+		poetry run pytest --testmon $(MODULES_DIR)/$*/tests/ -v -x $(ARGS); \
 		EXIT_CODE=$$?; \
 		if [ $$EXIT_CODE -eq 5 ]; then \
 			echo "⚠️  No tests collected for module: $* (skipping)"; \
@@ -495,11 +571,11 @@ $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
 		echo "⚠️  No tests found for module: $*"; \
 	fi
 
-# Individual provider tests (auto-generated targets)
+# Individual provider tests (auto-generated targets, incremental by default)
 $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)): test-provider-%:
-	@echo "Running tests for provider: $*..."
+	@echo "Running tests for provider: $* (incremental)..."
 	@if [ -d "$(PROVIDERS_DIR)/$*/tests" ]; then \
-		poetry run pytest $(PROVIDERS_DIR)/$*/tests/ -v -x $(ARGS); \
+		poetry run pytest --testmon $(PROVIDERS_DIR)/$*/tests/ -v -x $(ARGS); \
 		EXIT_CODE=$$?; \
 		if [ $$EXIT_CODE -eq 5 ]; then \
 			echo "⚠️  No tests collected for provider: $* (skipping)"; \
@@ -511,11 +587,39 @@ $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)): test-provider-%:
 	fi
 
 test-integration: check-generate-keypair check-generate-hmac-key
-	@echo "Running integration tests..."
-	poetry run pytest tests/integration/ -v -x -m integration $(ARGS)
+	@echo "Running integration tests (incremental)..."
+	@# Backend manager tests require ordered execution, run without testmon
+	poetry run pytest tests/integration/ -v -x --testmon -m integration --ignore=tests/integration/test_backend_manager_integration.py $(ARGS)
+	@# Use xdist for parallel execution with loadgroup distribution
+	poetry run pytest tests/integration/test_backend_manager_integration.py -v -x -m integration -n auto --dist=loadgroup $(ARGS)
 
-test: test-boundaries test-providers test-modules test-integration
-	@echo "✅ All tests passed (boundaries + providers + modules + integration)"
+test-integration-full: check-generate-keypair check-generate-hmac-key
+	@echo "Running integration tests (full)..."
+	poetry run pytest tests/integration/ -v -x -m integration --ignore=tests/integration/test_backend_manager_integration.py $(ARGS)
+	@# Use xdist for parallel execution with loadgroup distribution
+	poetry run pytest tests/integration/test_backend_manager_integration.py -v -x -m integration -n auto --dist=loadgroup $(ARGS)
+
+test-datastores: check-generate-keypair check-generate-hmac-key
+	@echo "Running datastore tests (incremental)..."
+	@for datastore in $(DISCOVERED_DATASTORES); do \
+		echo ""; \
+		echo "Testing datastore: $$datastore"; \
+		poetry run pytest --testmon src/trading_api/datastores/$$datastore/tests/ -v $(ARGS) || exit 1; \
+	done
+
+test-datastores-full: check-generate-keypair check-generate-hmac-key
+	@echo "Running datastore tests (full)..."
+	@for datastore in $(DISCOVERED_DATASTORES); do \
+		echo ""; \
+		echo "Testing datastore: $$datastore"; \
+		poetry run pytest src/trading_api/datastores/$$datastore/tests/ -v $(ARGS) || exit 1; \
+	done
+
+test: test-boundaries test-providers test-modules test-datastores test-integration
+	@echo "✅ All tests passed (incremental with testmon)"
+
+test-full: test-boundaries-full test-providers-full test-modules-full test-datastores-full test-integration-full
+	@echo "✅ All tests passed (full suite)"
 
 # Coverage targets
 test-cov: check-generate-keypair check-generate-hmac-key test-boundaries
@@ -526,6 +630,30 @@ test-cov: check-generate-keypair check-generate-hmac-key test-boundaries
 	@rm -f .coverage.* 2>/dev/null || true
 	@echo "✓ Removed intermediate .coverage.* files"
 	@echo "✅ Coverage report generated: coverage.xml"
+
+# ============================================
+# TESTMON UTILITIES
+# ============================================
+
+# Force full test run (rebuild testmon database)
+testmon-forcerun: check-generate-keypair check-generate-hmac-key testmon-reset
+	@echo "Running all tests (rebuilding testmon database)..."
+	poetry run pytest --testmon -v $(ARGS)
+
+# Reset testmon database
+testmon-reset:
+	@echo "Resetting testmon database..."
+	rm -f .testmondata
+	@echo "✅ Testmon database cleared"
+
+# Show testmon status
+testmon-status:
+	@if [ -f ".testmondata" ]; then \
+		echo "✅ Testmon database exists"; \
+		ls -lh .testmondata; \
+	else \
+		echo "⚠️  No testmon database found (run tests with --testmon first)"; \
+	fi
 
 # Linting and formatting
 lint:
@@ -539,7 +667,7 @@ type-check:
 	poetry run flake8 src/ tests/
 	poetry run mypy src/ --exclude='.*_generated'
 	@echo "Running pyright type checking..."
-	poetry run pyright src/
+	poetry run pyright src/ tests/
 
 format:
 	@echo "Formatting backend code..."
@@ -551,7 +679,7 @@ format:
 	@echo "✅ Backend formatting complete"
 
 # Development server
-dev:
+dev: db-up
 	@echo "Starting backend development server with debugpy on http://localhost:$(BACKEND_PORT)"
 	@echo "🔍 Checking if backend port is available..."
 	@if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
@@ -568,10 +696,8 @@ dev:
 	@echo "Debug server listening on port 4444 (attach debugger to localhost:4444)"
 	poetry run python -m debugpy --listen 0.0.0.0:4444 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" \
 		--reload \
+		--reload-dir src/ \
 		--reload-exclude '**/*__generated/*' \
-		--reload-exclude '**/.local/*' \
-		--reload-exclude '**/.pids/*' \
-		--reload-exclude '**/scripts/*' \
 		--reload-exclude '**/__pycache__/*' \
 		--reload-exclude '**/*.pyc' \
 		--host 0.0.0.0 \
@@ -841,9 +967,9 @@ install-tws-api: ## Install TWS API with protobuf regeneration and validation
 
 show-cache: ## Show contract cache statistics and latest records
 	@echo "🔍 Inspecting contract cache..."
-	@if [ ! -f ".cache/contracts.db" ]; then \
+	@if [ ! -f ".local/DB/sqlite/contracts.db" ]; then \
 		echo ""; \
-		echo "❌ Cache database not found at .cache/contracts.db"; \
+		echo "❌ Cache database not found at .local/DB/sqlite/contracts.db"; \
 		echo ""; \
 		echo "💡 The cache is created after first use:"; \
 		echo "   1. Start the backend: make dev"; \
@@ -865,9 +991,91 @@ show-cache-symbol: ## Show contracts matching symbol (usage: make show-cache-sym
 	fi
 	@poetry run python scripts/inspect_contract_cache.py --symbol $(symbol)
 
-# echo ""
+# Database Management (PostgreSQL via Docker)
+.PHONY: db-up db-down db-status db-logs db-psql
+
+# Datastore configuration - loaded from .env, fallbacks for safety
+DATASTORE_POSTGRES_PORT ?= 5433
+DATASTORE_POSTGRES_DB ?= trader_pro
+
+db-up: ## Start PostgreSQL database (docker-compose)
+	@echo "🐘 Starting PostgreSQL database..."
+	@DATASTORE_POSTGRES_PORT=$(DATASTORE_POSTGRES_PORT) DATASTORE_POSTGRES_DB=$(DATASTORE_POSTGRES_DB) \
+		docker-compose -f docker-compose.dev.yml up -d
+	@echo "Waiting for PostgreSQL to be ready..."
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if docker-compose -f docker-compose.dev.yml exec -T postgres pg_isready -U trader -d $(DATASTORE_POSTGRES_DB) >/dev/null 2>&1; then \
+			echo "✅ PostgreSQL is ready!"; \
+			break; \
+		fi; \
+		echo "  Waiting... ($$i/10)"; \
+		sleep 2; \
+	done
+	@echo ""
+	@echo "Connection string: postgresql://trader:trader_dev@localhost:$(DATASTORE_POSTGRES_PORT)/$(DATASTORE_POSTGRES_DB)"
+
+db-down: ## Stop PostgreSQL database
+	@echo "🛑 Stopping PostgreSQL database..."
+	@docker-compose -f docker-compose.dev.yml down
+	@echo "✅ PostgreSQL stopped"
+
+db-status: ## Show PostgreSQL container status
+	@docker-compose -f docker-compose.dev.yml ps
+
+db-logs: ## Tail PostgreSQL logs
+	@docker-compose -f docker-compose.dev.yml logs -f postgres
+
+db-psql: ## Connect to PostgreSQL via psql
+	@docker-compose -f docker-compose.dev.yml exec postgres psql -U trader -d $(DATASTORE_POSTGRES_DB)
+
+# Alembic Migrations (SQLModel Wave 2B)
+.PHONY: alembic-upgrade alembic-downgrade alembic-revision alembic-current alembic-history db-migrate db-reset
+
+alembic-upgrade: ## Run Alembic upgrade to head
+	@echo "🔄 Running Alembic migrations..."
+	poetry run alembic upgrade head
+	@echo "✅ Migrations complete"
+
+alembic-downgrade: ## Roll back one Alembic migration
+	@echo "⏪ Rolling back one migration..."
+	poetry run alembic downgrade -1
+	@echo "✅ Rollback complete"
+
+alembic-revision: ## Create new Alembic migration (usage: make alembic-revision msg="description")
+	@if [ -z "$(msg)" ]; then \
+		echo "❌ Error: Please provide a message"; \
+		echo "Usage: make alembic-revision msg=\"your migration description\""; \
+		exit 1; \
+	fi
+	poetry run alembic revision --autogenerate -m "$(msg)"
+
+alembic-current: ## Show current Alembic revision
+	poetry run alembic current
+
+alembic-history: ## Show Alembic migration history
+	poetry run alembic history
+
+db-migrate: alembic-upgrade ## Alias for alembic-upgrade
+
+db-reset: ## Reset database (destroy and recreate with migrations)
+	@echo "⚠️  This will destroy all data in the database!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	@echo "🗑️  Destroying database..."
+	docker-compose -f docker-compose.dev.yml down -v
+	@echo "🐘 Recreating database..."
+	docker-compose -f docker-compose.dev.yml up -d postgres
+	@echo "⏳ Waiting for PostgreSQL to be ready..."
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if docker-compose -f docker-compose.dev.yml exec -T postgres pg_isready -U trader > /dev/null 2>&1; then \
+			echo "✓ PostgreSQL is ready"; \
+			break; \
+		fi; \
+		echo "  Attempt $$i/10 - waiting..."; \
+		sleep 2; \
+	done
+	$(MAKE) alembic-upgrade
 	@echo "========================================"
-	@echo "✅ TWS API installation complete!"
+	@echo "✅ Database reset complete"
 	@echo "========================================"
 
 # JWT Key Pair Management

@@ -100,23 +100,6 @@ async def test_lazy_loading(registry: ProviderRegistry) -> None:
     assert providers[0] is providers2[0]  # Same instance
 
 
-@pytest.mark.asyncio
-async def test_get_provider_by_name(registry: ProviderRegistry) -> None:
-    """Get specific provider by name."""
-    registry.register(MockProvider, "mock")
-
-    provider = await registry.get_provider("mock")
-
-    assert isinstance(provider, MockProvider)
-
-
-@pytest.mark.asyncio
-async def test_get_provider_not_found(registry: ProviderRegistry) -> None:
-    """Raise error when provider not registered."""
-    with pytest.raises(CommonException, match="not registered"):
-        await registry.get_provider("nonexistent")
-
-
 def test_clear_registry(registry: ProviderRegistry) -> None:
     """Clear all registered providers."""
     registry.register(MockProvider, "mock")

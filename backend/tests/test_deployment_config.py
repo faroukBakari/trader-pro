@@ -319,5 +319,5 @@ class TestLoadConfig:
         assert len(port_numbers) == len(set(port_numbers))  # No duplicates
 
         # Validate module servers have their respective modules configured
-        assert config.servers["broker"].modules == ["broker"]
+        assert config.servers["broker"].modules == ["broker", "auth"]
         assert config.servers["datafeed"].modules == ["datafeed"]

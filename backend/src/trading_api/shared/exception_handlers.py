@@ -4,13 +4,15 @@ Global exception handlers for FastAPI.
 Converts TradingApiException hierarchy to HTTP responses and WebSocket close codes.
 """
 
+from __future__ import annotations
+
 import logging
 import traceback
 from http import HTTPStatus
 from pathlib import Path
-from typing import List
+from typing import TYPE_CHECKING, List
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketException
+from fastapi import Request, WebSocket, WebSocketException
 from fastapi import status as WebSocketStatus
 from fastapi.exceptions import RequestValidationError, WebSocketRequestValidationError
 from fastapi.responses import JSONResponse
@@ -18,6 +20,9 @@ from fastapi.websockets import WebSocketState
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from trading_api.models.exceptions import TradingApiException
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

@@ -469,7 +469,6 @@ make generate-openapi-client
 **Design Constraints**:
 
 1. **API Versioning Constraint**:
-
    - Use per-module-version API classes from generated clients (e.g., `BrokerApi` from `trader-client-broker_v1`)
    - **DO NOT** import individual API methods directly
    - Each module+version generates its own client package: `trader-client-{module}_v{version}`
@@ -510,7 +509,7 @@ import type { ResourceData as ResourceData_Backend } from "@clients/trader-clien
 import type { FrontendResourceData } from "@/types";
 
 export function mapResourceData(
-  data: FrontendResourceData
+  data: FrontendResourceData,
 ): ResourceData_Backend {
   return {
     name: data.name,
@@ -526,7 +525,7 @@ const response = await this.rawApi.createResource(mapResourceData(resource));
 
 // ❌ INCORRECT: Casting entire object
 const response = await this.rawApi.createResource(
-  resource as unknown as BackendResource
+  resource as unknown as BackendResource,
 );
 ```
 
@@ -847,7 +846,7 @@ export class ServiceAdapter implements ExternalLibraryInterface {
 
   constructor(
     externalDeps: ExternalDependencies,
-    mock: boolean = true // 👈 Default to fallback for safety
+    mock: boolean = true, // 👈 Default to fallback for safety
   ) {
     this._externalDeps = externalDeps;
     this.mock = mock;
@@ -991,7 +990,7 @@ VITE_USE_MOCK_{SERVICE}=false make test  # Tests will FAIL ❌
 
 **Service Design Guidelines**:
 
-1. **State Management**: Use in-memory storage (Dict, List) for development/testing
+1. **State Management**: Use in-memory storage (dict, list) for development/testing
 2. **Async Operations**: Use `async/await` for all public methods
 3. **ID Generation**: Generate unique IDs with prefixes (e.g., `RESOURCE-{counter}`)
 4. **Error Handling**: Raise `ValueError` for business logic errors
@@ -1002,7 +1001,7 @@ VITE_USE_MOCK_{SERVICE}=false make test  # Tests will FAIL ❌
 ```python
 import asyncio
 import time
-from typing import Dict, List, Optional
+from typing import Optional
 from trading_api.models.{domain} import (
     ResourceRequest,
     ResourceResponse,
@@ -1016,7 +1015,7 @@ class {ServiceName}Service:
 
     def __init__(self) -> None:
         # In-memory state (replace with DB in production)
-        self._resources: Dict[str, ResourceResponse] = {}
+        self._resources: dict[str, ResourceResponse] = {}
         self._counter = 1
 
     async def create_resource(self, request: ResourceRequest) -> ResourceOperationResult:
@@ -1370,7 +1369,7 @@ test("service features end-to-end", async ({ page }) => {
 
   // Verify creation success
   await expect(page.locator('[data-testid="resource-list"]')).toContainText(
-    "Test Resource"
+    "Test Resource",
   );
 
   // Test resource update
@@ -1380,7 +1379,7 @@ test("service features end-to-end", async ({ page }) => {
 
   // Verify update
   await expect(page.locator('[data-testid="resource-list"]')).toContainText(
-    "Updated Resource"
+    "Updated Resource",
   );
 
   // Test resource deletion
@@ -1389,7 +1388,7 @@ test("service features end-to-end", async ({ page }) => {
 
   // Verify deletion
   await expect(page.locator('[data-testid="resource-list"]')).not.toContainText(
-    "Updated Resource"
+    "Updated Resource",
   );
 });
 ```

@@ -2,10 +2,15 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 
-from trading_api.models.common import CapabilitySpec
+from trading_api.models.common import (
+    CapabilitySpec,
+    DatastoreCapabilitySpec,
+    ProviderCapabilitySpec,
+)
 from trading_api.models.exceptions import CommonException
 from trading_api.models.health import HealthResponse
 from trading_api.models.versioning import APIMetadata, VersionInfo
+from trading_api.shared import DatastoreInterface
 from trading_api.shared.provider_interface import Provider
 
 
@@ -14,22 +19,32 @@ class ServiceInterface(ABC):
         self,
         module_dir: Path,
         *,  # Force keyword-only
-        providers: list["Provider"] | None = None,
+        providers: list[Provider] | None = None,
+        datastores: list[DatastoreInterface] | None = None,
     ) -> None:
         """Initialize service.
 
         Args:
             module_dir: Module directory path
             providers: Provider instances for required capabilities
+            datastores: Optional shared datastores for repository injection
 
         Raises:
             CommonException: If required capability not satisfied
         """
+        providers = providers or []
+        datastores = datastores or []
+
+        assert (
+            datastores
+        ), "At least one datastore must be provided to the service layer."
+
         super().__init__()
         self.module_dir = module_dir
+        self.datastores = datastores
 
         # Build capability map and fail-fast validate
-        self._capability_map = self._resolve_capabilities(providers or [])
+        self._capability_map = self._resolve_provider_capabilities(providers or [])
 
         api_dir = self.module_dir / "api"
         available_versions: dict[str, VersionInfo] = {}
@@ -65,21 +80,50 @@ class ServiceInterface(ABC):
 
     @classmethod
     @abstractmethod
-    def capabilities(cls) -> list[CapabilitySpec]:
-        """Return required capabilities for this service.
+    def provider_capabilities(cls) -> list[ProviderCapabilitySpec]:
+        """Return required provider capabilities for this service.
 
         [CLASSMETHOD]: Static declaration for app startup analysis.
 
         Returns:
-            List of capability requirements
+            List of provider capability requirements
 
         Examples:
-            >>> AuthService.capabilities()
-            [CapabilitySpec(name="auth")]
+            >>> AuthService.provider_capabilities()
+            [ProviderCapabilitySpec(name="auth")]
         """
         ...
 
-    def _resolve_capabilities(
+    @classmethod
+    def datastore_capabilities(cls) -> list[DatastoreCapabilitySpec]:
+        """Return required datastore capabilities for this service.
+
+        [CLASSMETHOD]: Static declaration for app startup analysis.
+        [DEFAULT]: Returns empty list - no special capabilities required.
+
+        Override in services that need specific datastore features:
+        - "persistence": Data survives restarts
+        - "transactions": Atomic multi-operation support
+        - "timeseries": Time-range queries (get_time_range, set_batch)
+        - "rangequery": Gap detection (get_missing_ranges)
+        - "exclusion": Database-level exclusion constraints
+
+        Returns:
+            List of datastore capability requirements
+
+        Examples:
+            >>> DatafeedService.datastore_capabilities()
+            [DatastoreCapabilitySpec(name="timeseries")]
+        """
+        return []
+
+    # Backward compatibility alias - will be deprecated
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        """Deprecated: Use provider_capabilities() instead."""
+        return cls.provider_capabilities()
+
+    def _resolve_provider_capabilities(
         self, providers: list[Provider]
     ) -> dict[str, list[Provider]]:
         """Resolve and cache capability → provider mapping.
@@ -92,7 +136,7 @@ class ServiceInterface(ABC):
 
         capability_map: dict[str, list[Provider]] = {}
 
-        for req_cap in self.capabilities():
+        for req_cap in self.provider_capabilities():
             provs = [
                 provider
                 for provider in providers
@@ -114,6 +158,65 @@ class ServiceInterface(ABC):
             capability_map[req_cap.name] = provs
 
         return capability_map
+
+    def _resolve_datastore_capabilities(self) -> DatastoreInterface | None:
+        """Select datastore based on capability requirements.
+
+        [FAIL-FAST]: Validates at initialization, not at request time.
+
+        Returns:
+            Best matching datastore, or None if no requirements
+
+        Raises:
+            CommonException: If required capability not found
+        """
+        required_caps = self.datastore_capabilities()
+
+        # No requirements? Return None (caller can use default)
+        if not required_caps:
+            return None
+
+        # Score each datastore by how many required capabilities it provides
+        best_datastore: DatastoreInterface | None = None
+        best_score = -1
+
+        for datastore in self.datastores:
+            provided_caps = datastore.capabilities()
+            score = 0
+            missing_required: list[str] = []
+
+            for req_cap in required_caps:
+                matched = any(req_cap.matches(prov_cap) for prov_cap in provided_caps)
+                if matched:
+                    score += 1
+                elif not req_cap.optional:
+                    missing_required.append(req_cap.name)
+
+            # If missing any required capabilities, skip this datastore
+            if missing_required:
+                continue
+
+            # Best score wins
+            if score > best_score:
+                best_score = score
+                best_datastore = datastore
+
+        if best_datastore is None:
+            required_names = [c.name for c in required_caps if not c.optional]
+            available_caps = {
+                type(ds).__name__: [c.name for c in ds.capabilities()]
+                for ds in self.datastores
+            }
+            raise CommonException(
+                code="COMMON_DATASTORE_CAPABILITY_NOT_FOUND",
+                message=(
+                    f"Service '{self.module_name}' requires datastore capabilities "
+                    f"{required_names} but no matching datastore found. "
+                    f"Available: {available_caps}"
+                ),
+            )
+
+        return best_datastore
 
     def get_capability_provider(
         self, capability_name: str, preferred_provider: str | None = None
@@ -149,6 +252,39 @@ class ServiceInterface(ABC):
                     f"'{capability_name}' not found."
                 )
         return next(iter(providers))
+
+    def get_featured_datastore(self, *required_capabilities: str) -> DatastoreInterface:
+        """Get a datastore that provides specific capabilities.
+
+        Args:
+            *required_capabilities: Capability names needed (e.g., "timeseries", "transactions")
+
+        Returns:
+            DatastoreInterface: First datastore matching all requirements
+
+        Raises:
+            CommonException: If no datastore provides all required capabilities
+
+        Examples:
+            >>> ds = self.get_featured_datastore("timeseries")
+            >>> ds = self.get_featured_datastore("transactions", "persistence")
+        """
+        for datastore in self.datastores:
+            provided = {cap.name for cap in datastore.capabilities()}
+            if all(req in provided for req in required_capabilities):
+                return datastore
+
+        available_caps = {
+            type(ds).__name__: [c.name for c in ds.capabilities()]
+            for ds in self.datastores
+        }
+        raise CommonException(
+            code="COMMON_DATASTORE_CAPABILITY_NOT_FOUND",
+            message=(
+                f"No datastore provides capabilities {list(required_capabilities)}. "
+                f"Available: {available_caps}"
+            ),
+        )
 
     @property
     def module_name(self) -> str:

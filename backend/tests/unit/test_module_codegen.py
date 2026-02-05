@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 # Import MockBrokerProvider from conftest
 from tests.conftest import MockBrokerProvider  # type: ignore  # noqa: E402
 from trading_api.capabilities.datafeed import DatafeedCapability  # noqa: E402
+from trading_api.datastores import InMemoryDatastore  # noqa: E402
 from trading_api.models.common import CapabilitySpec, ProviderConfig  # noqa: E402
 from trading_api.models.exceptions import (  # noqa: E402
     CommonException,
@@ -75,7 +76,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     ) -> list[QuoteData]:
         return []
 
-    def subscribe_realtime_bars(
+    async def subscribe_realtime_bars(
         self,
         ticker_name: str,
         resolution: Resolution,
@@ -85,7 +86,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     ) -> str:
         return "sub_0"
 
-    def subscribe_market_data(
+    async def subscribe_market_data(
         self,
         ticker_name: str,
         callback: Callable[[QuoteData], Awaitable[None]],
@@ -112,9 +113,10 @@ class TestModuleCodegen:
         """
         # Provide mock provider for datafeed capability
         mock_provider = MockDatafeedProvider()
+        datastore = InMemoryDatastore()
 
         # Instantiate module with provider
-        module = DatafeedModule(providers=[mock_provider])
+        module = DatafeedModule(providers=[mock_provider], datastores=[datastore])
 
         # Create apps using ModuleApp wrapper (correct pattern)
         module_app = ModuleApp(module)
@@ -127,9 +129,10 @@ class TestModuleCodegen:
         """Test that BrokerModule can generate apps via ModuleApp wrapper."""
         # Provide mock provider for broker capability
         mock_provider = MockBrokerProvider()
+        datastore = InMemoryDatastore()
 
         # Instantiate module with provider
-        module = BrokerModule(providers=[mock_provider])
+        module = BrokerModule(providers=[mock_provider], datastores=[datastore])
 
         # Create apps using ModuleApp wrapper (correct pattern)
         module_app = ModuleApp(module)
@@ -142,9 +145,10 @@ class TestModuleCodegen:
         """Test that ModuleApp can generate specs and clients."""
         # Provide mock provider for datafeed capability
         mock_provider = MockDatafeedProvider()
+        datastore = InMemoryDatastore()
 
         # Instantiate module with provider
-        module = DatafeedModule(providers=[mock_provider])
+        module = DatafeedModule(providers=[mock_provider], datastores=[datastore])
 
         # Create apps using ModuleApp wrapper
         module_app = ModuleApp(module)
@@ -160,11 +164,14 @@ class TestModuleCodegen:
         This ensures fail-fast validation works when modules are
         instantiated directly (e.g., in codegen scripts).
         """
+        datastore = InMemoryDatastore()
         with pytest.raises(
             CommonException,
             match="Service 'auth' requires capability 'auth'",
         ):
-            AuthModule()  # Should fail: no providers for auth capability
+            AuthModule(
+                datastores=[datastore]
+            )  # Should fail: no providers for auth capability
 
     @pytest.mark.parametrize("module_name", ["datafeed", "broker"])
     def test_module_codegen_script_for_modules_without_capabilities(

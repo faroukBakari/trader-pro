@@ -151,8 +151,8 @@ __all__ = [
     "SubscriptionError",
     "SubscriptionResponse",
     "SubscriptionUpdate",
-    "CapabilityName",
-    "CapabilitySpec",
+    "ProviderCapabilityName",
+    "ProviderCapabilitySpec",
     "ProviderConfig",
 ]
 
@@ -162,12 +162,12 @@ __all__ = [
 # ==============================================================================
 
 # Capability name for auth, broker, datafeed
-CapabilityName = Literal["auth", "broker", "datafeed"]
+ProviderCapabilityName = Literal["auth", "broker", "datafeed"]
 
 
 @dataclass(frozen=True)
-class CapabilitySpec:
-    """Type-safe capability specification.
+class ProviderCapabilitySpec:
+    """Type-safe provider capability specification.
 
     Used by both services (to declare requirements) and providers
     (to declare what they provide).
@@ -175,10 +175,10 @@ class CapabilitySpec:
     [IMMUTABLE]: Frozen dataclass ensures specs cannot be mutated after creation.
     """
 
-    name: CapabilityName
+    name: ProviderCapabilityName
     version: str | None = None  # None = any version
 
-    def matches(self, provider_capability: "CapabilitySpec") -> bool:
+    def matches(self, provider_capability: "ProviderCapabilitySpec") -> bool:
         """Check if provider capability satisfies this requirement.
 
         Args:
@@ -189,13 +189,13 @@ class CapabilitySpec:
 
         Examples:
             >>> # Service requires auth (any version)
-            >>> req = CapabilitySpec(name="auth")
-            >>> prov = CapabilitySpec(name="auth", version="v1")
+            >>> req = ProviderCapabilitySpec(name="auth")
+            >>> prov = ProviderCapabilitySpec(name="auth", version="v1")
             >>> req.matches(prov)  # True
 
             >>> # Service requires specific version
-            >>> req = CapabilitySpec(name="auth", version="v1")
-            >>> prov = CapabilitySpec(name="auth", version="v2")
+            >>> req = ProviderCapabilitySpec(name="auth", version="v1")
+            >>> prov = ProviderCapabilitySpec(name="auth", version="v2")
             >>> req.matches(prov)  # False
         """
         # Name must match exactly
@@ -212,6 +212,54 @@ class CapabilitySpec:
     def __str__(self) -> str:
         """String representation for logging."""
         return f"{self.name}:{self.version}" if self.version else self.name
+
+
+# Backward compatibility alias (deprecated)
+CapabilitySpec = ProviderCapabilitySpec
+
+
+# ==============================================================================
+# Datastore Capability System Models
+# ==============================================================================
+
+# Capability names for datastores
+DatastoreCapabilityName = Literal[
+    "persistence",  # Data survives process restarts
+    "transactions",  # ACID transaction support
+    "timeseries",  # Time-range queries and batch operations
+    "rangequery",  # Gap detection via multirange operations
+    "exclusion",  # Range exclusion constraints
+]
+
+
+@dataclass(frozen=True)
+class DatastoreCapabilitySpec:
+    """Type-safe datastore capability specification.
+
+    Used by services (to declare requirements) and datastores
+    (to declare what they provide).
+
+    [IMMUTABLE]: Frozen dataclass ensures specs cannot be mutated after creation.
+    """
+
+    name: DatastoreCapabilityName
+    optional: bool = False  # True = prefer if available, False = fail if missing
+
+    def matches(self, provided_capability: "DatastoreCapabilitySpec") -> bool:
+        """Check if provided capability satisfies this requirement.
+
+        Args:
+            provided_capability: Capability offered by datastore
+
+        Returns:
+            True if datastore can satisfy this requirement
+        """
+        return self.name == provided_capability.name
+
+    def __str__(self) -> str:
+        """String representation for logging."""
+        suffix = " (optional)" if self.optional else ""
+        return f"{self.name}{suffix}"
 
 
 class ProviderConfig(BaseSettings):

@@ -18,6 +18,7 @@ import pytest
 # Import MockBrokerProvider from conftest
 from tests.conftest import MockBrokerProvider  # type: ignore
 from trading_api.capabilities.datafeed import DatafeedCapability
+from trading_api.datastores import InMemoryDatastore
 from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
@@ -73,7 +74,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     ) -> list[QuoteData]:
         return []
 
-    def subscribe_realtime_bars(
+    async def subscribe_realtime_bars(
         self,
         ticker_name: str,
         resolution: Resolution,
@@ -83,7 +84,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     ) -> str:
         return "sub_0"
 
-    def subscribe_market_data(
+    async def subscribe_market_data(
         self,
         ticker_name: str,
         callback: Callable[[QuoteData], Awaitable[None]],
@@ -221,7 +222,8 @@ class TestModuleRegistryExistingFunctionality:
 
         # Provide mock provider for broker capability using get_modules
         mock_broker = MockBrokerProvider()
-        modules = registry.get_modules(module_names=["broker"], providers=[mock_broker])
+        datastore = InMemoryDatastore()
+        modules = registry.get_modules(providers=[mock_broker], datastores=[datastore])
         module = modules[0] if modules else None
 
         assert module is not None
@@ -230,14 +232,14 @@ class TestModuleRegistryExistingFunctionality:
     def test_get_modules_filtered(self, registry: ModuleRegistry):
         """Verify getting filtered modules works."""
         from trading_api.modules.broker import BrokerModule
-        from trading_api.modules.datafeed import DatafeedModule
 
+        # Only register the module we want to test
         registry.register(BrokerModule, "broker")
-        registry.register(DatafeedModule, "datafeed")
 
         # Provide mock provider for broker capability
         mock_broker = MockBrokerProvider()
-        modules = registry.get_modules(module_names=["broker"], providers=[mock_broker])
+        datastore = InMemoryDatastore()
+        modules = registry.get_modules(providers=[mock_broker], datastores=[datastore])
 
         assert len(modules) == 1
         assert isinstance(modules[0], BrokerModule)
@@ -300,27 +302,27 @@ class TestModuleVersionSelection:
         assert version == "v1"
 
     def test_get_modules_with_specific_version(self, registry: ModuleRegistry):
-        """Test loading a module with a specific version."""
+        """Test loading a module with a specific version via _get_instance."""
         from trading_api.modules.broker import BrokerModule
 
         registry.register(BrokerModule, "broker")
 
         # Provide mock provider for broker capability
         mock_broker = MockBrokerProvider()
+        datastore = InMemoryDatastore()
 
-        # Load broker with only v1
-        modules = registry.get_modules(
-            module_names=["broker:v1"], providers=[mock_broker]
+        # Load broker with only v1 using _get_instance directly
+        module = registry._get_instance(
+            "broker", version="v1", providers=[mock_broker], datastores=[datastore]
         )
 
-        assert len(modules) == 1
-        assert modules[0].name == "broker"
-        assert modules[0].versions == ["v1"]
-        assert len(modules[0].api_routers) == 1
-        assert "v1" in modules[0].api_routers
+        assert module.name == "broker"
+        assert module.versions == ["v1"]
+        assert len(module.api_routers) == 1
+        assert "v1" in module.api_routers
 
     def test_get_modules_mixed_version_specs(self, registry: ModuleRegistry):
-        """Test loading modules with mixed version specifications."""
+        """Test loading modules with mixed version specifications via _get_instance."""
         from trading_api.modules.broker import BrokerModule
         from trading_api.modules.datafeed import DatafeedModule
 
@@ -330,16 +332,15 @@ class TestModuleVersionSelection:
         # Provide mock providers for capabilities
         mock_datafeed = MockDatafeedProvider()
         mock_broker = MockBrokerProvider()
+        datastore = InMemoryDatastore()
 
-        # Load broker:v1 and datafeed (all versions)
-        modules = registry.get_modules(
-            module_names=["broker:v1", "datafeed"],
-            providers=[mock_datafeed, mock_broker],
+        # Load broker:v1 (specific version) and datafeed (all versions)
+        broker = registry._get_instance(
+            "broker", version="v1", providers=[mock_broker], datastores=[datastore]
         )
-
-        assert len(modules) == 2
-        broker = next(m for m in modules if m.name == "broker")
-        datafeed = next(m for m in modules if m.name == "datafeed")
+        datafeed = registry._get_instance(
+            "datafeed", providers=[mock_datafeed], datastores=[datastore]
+        )
 
         assert broker.versions == ["v1"]  # Only v1
         assert len(datafeed.versions) >= 1  # All versions
@@ -355,29 +356,26 @@ class TestModuleVersionSelection:
         # Provide mock providers for capabilities
         mock_datafeed = MockDatafeedProvider()
         mock_broker = MockBrokerProvider()
+        datastore = InMemoryDatastore()
 
         # Load broker:v1 (specific version)
-        modules_broker = registry.get_modules(
-            module_names=["broker:v1"], providers=[mock_broker]
+        broker = registry._get_instance(
+            "broker", version="v1", providers=[mock_broker], datastores=[datastore]
         )
         # Load datafeed without version (all versions)
-        modules_datafeed = registry.get_modules(
-            module_names=["datafeed"], providers=[mock_datafeed]
+        datafeed = registry._get_instance(
+            "datafeed", providers=[mock_datafeed], datastores=[datastore]
         )
 
         # Should be different instances with different version lists
-        broker = modules_broker[0]
-        datafeed = modules_datafeed[0]
-
         assert broker is not datafeed
         assert broker.versions == ["v1"]  # Only v1
         assert len(datafeed.versions) >= 1  # All available versions
 
         # Test same module with different version specs creates different instances
-        modules_broker_all = registry.get_modules(
-            module_names=["broker"], providers=[mock_broker]
+        broker_all = registry._get_instance(
+            "broker", providers=[mock_broker], datastores=[datastore]
         )
-        broker_all = modules_broker_all[0]
 
         assert broker is not broker_all  # Different instances
         assert broker.versions == ["v1"]
@@ -391,17 +389,18 @@ class TestModuleVersionSelection:
 
         # Provide mock provider for broker capability
         mock_broker = MockBrokerProvider()
+        datastore = InMemoryDatastore()
 
         # Load broker:v1 twice
-        modules_1 = registry.get_modules(
-            module_names=["broker:v1"], providers=[mock_broker]
+        module_1 = registry._get_instance(
+            "broker", version="v1", providers=[mock_broker], datastores=[datastore]
         )
-        modules_2 = registry.get_modules(
-            module_names=["broker:v1"], providers=[mock_broker]
+        module_2 = registry._get_instance(
+            "broker", version="v1", providers=[mock_broker], datastores=[datastore]
         )
 
         # Should be the same instance (cached)
-        assert modules_1[0] is modules_2[0]
+        assert module_1 is module_2
 
     def test_get_modules_all_versions_when_no_spec(self, registry: ModuleRegistry):
         """Test that omitting version spec loads all versions."""
@@ -411,11 +410,12 @@ class TestModuleVersionSelection:
 
         # Provide mock provider for broker capability
         mock_broker = MockBrokerProvider()
+        datastore = InMemoryDatastore()
 
-        # Load broker without version spec
-        modules = registry.get_modules(module_names=["broker"], providers=[mock_broker])
+        # Load broker without version spec via get_modules
+        modules = registry.get_modules(providers=[mock_broker], datastores=[datastore])
 
         assert len(modules) == 1
-        # Should have multiple versions
+        # Should have all available versions
         assert len(modules[0].versions) >= 1
         assert len(modules[0].api_routers) >= 1

@@ -1,10 +1,10 @@
 # Implementation Methodologies
 
-**Version**: 1.0.1  
-**Last Updated**: November 30, 2025  
+**Version**: 1.1.0  
+**Last Updated**: February 7, 2026  
 **Status**: ✅ Current
 
-This directory contains proven implementation methodologies for building new features using Test-Driven Development (TDD) principles.
+This directory contains proven implementation methodologies for building new features using Test-Driven Development (TDD) principles, as well as AI agent configuration guides.
 
 ---
 
@@ -15,6 +15,32 @@ Our implementation methodologies provide step-by-step templates for adding new f
 ---
 
 ## Available Methodologies
+
+### Custom Agent Development
+
+**File**: [AGENT-MD-METHODOLOGY.md](AGENT-MD-METHODOLOGY.md)
+
+**Purpose**: Comprehensive guide for creating VS Code custom agents (`.agent.md` files) optimized for Claude models
+
+**Key Features**:
+
+- Complete YAML frontmatter property reference
+- Tool aliases and restrictions
+- Subagent orchestration patterns
+- Handoffs for sequential workflows
+- Claude-specific optimizations (XML sections, constraint hierarchy)
+- Migration guide from `.prompt.md` files
+
+**When to Use**:
+
+- Creating specialized AI agents for repetitive tasks
+- Orchestrating multi-agent workflows
+- Implementing research/plan/implement pipelines
+- Configuring tool restrictions for safety
+
+**Estimated Time**: 30 minutes per agent
+
+---
 
 ### API Development (REST)
 
@@ -69,6 +95,14 @@ Our implementation methodologies provide step-by-step templates for adding new f
 ---
 
 ## When to Use These Guides
+
+### Use Agent Methodology When:
+
+- ✅ Creating specialized AI agents for repetitive development tasks
+- ✅ Building multi-agent orchestration workflows
+- ✅ Migrating from `.prompt.md` to `.agent.md` format
+- ✅ Implementing research → plan → implement pipelines
+- ✅ Need to restrict agent tool access for safety
 
 ### Use API Methodology When:
 
@@ -216,6 +250,6 @@ If you encounter issues:
 
 ---
 
-**Last Updated**: November 30, 2025  
+**Last Updated**: February 7, 2026  
 **Maintained by**: Development Team  
 **Ready to Start**: Choose your methodology and begin building! 🚀

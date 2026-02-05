@@ -29,7 +29,7 @@ class TestIsErrorRecoverable:
         # DatafeedService requires module_dir for base class init
         # We're only testing _is_error_recoverable which doesn't use provider
         service = DatafeedService.__new__(DatafeedService)
-        service._module_dir = tmp_path
+        service.module_dir = tmp_path
         return service
 
     def test_recoverable_timeout_error(self, service: DatafeedService) -> None:

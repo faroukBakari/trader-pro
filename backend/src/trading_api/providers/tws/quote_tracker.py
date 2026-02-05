@@ -656,7 +656,8 @@ class QuoteTracker(QuoteTrackerCBWiringInterface):
 
         def debounce_cancel(req_id: int) -> None:
             quote = self._quotes.get(req_id)
-            assert quote is not None, "quote should exist for debounce cancel"
+            if not quote:
+                return
             if not self._quote_in_use(req_id):
                 with self.tracker_lock:
                     self._requests.pop(quote.cached_contract.ticker, None)

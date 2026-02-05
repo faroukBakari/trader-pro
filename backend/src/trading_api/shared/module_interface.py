@@ -17,10 +17,12 @@ from fastapi import Depends, FastAPI
 
 from external_packages.fastws import Client
 from trading_api.models.auth import UserData
+from trading_api.shared import DatastoreInterface
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.client_generation_service import ClientGenerationService
 from trading_api.shared.exception_handlers import register_exception_handlers
 from trading_api.shared.middleware.auth import get_current_user_ws
+from trading_api.shared.provider_interface import Provider
 from trading_api.shared.service_interface import ServiceInterface
 from trading_api.shared.ws.fastws_adapter import FastWSAdapter
 from trading_api.shared.ws.ws_router import WsRouterBase
@@ -263,16 +265,21 @@ class Module(ABC):
         self,
         *,  # Force keyword-only arguments
         versions: list[str] | None = None,
-        providers: list[Any] | None = None,
+        providers: list[Provider] | None = None,
+        datastores: list[DatastoreInterface] | None = None,
     ) -> None:
         """Initialize module.
 
         Args:
             versions: API versions to load (None = all discovered versions)
             providers: Provider instances for capabilities (None = no providers)
+            datastores: Optional shared datastores for service repository injection
 
         [BACKWARD-COMPATIBLE]: Keyword-only ensures existing code works.
         """
+        providers = providers or []
+        datastores = datastores or []
+
         # Auto-discover available versions if not specified
         if versions is None:
             versions = self._discover_versions()
@@ -281,7 +288,9 @@ class Module(ABC):
 
         # Import shared service (version-agnostic)
         service_class = self._service_class()
-        self._service = service_class(self.module_dir(), providers=providers)
+        self._service = service_class(
+            self.module_dir(), providers=providers, datastores=datastores
+        )
 
         # Import version-specific API and WS routers
         # Structure: {"v1": [router1, router2], "v2": [router1, router2]}

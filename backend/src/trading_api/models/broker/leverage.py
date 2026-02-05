@@ -2,7 +2,7 @@
 Broker leverage and brackets models matching TradingView broker API types
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -34,7 +34,7 @@ class LeverageInfoParams(BaseModel):
     symbol: str = Field(..., description="Symbol identifier")
     orderType: OrderType = Field(..., description="Order type")
     side: Side = Field(..., description="Order side (buy or sell)")
-    customFields: Optional[Dict[str, Any]] = Field(
+    customFields: Optional[dict[str, Any]] = Field(
         default=None, description="Custom data for the broker"
     )
 

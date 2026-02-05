@@ -70,7 +70,8 @@ servers:
     port: 8001
     instances: 1
     modules:
-      - broker # Loads all versions
+      - broker # Core broker functionality
+      - auth # Auth co-located for token refresh
       # - broker:v1 # Optionally load specific version only
     reload: true # Enable uvicorn auto-reload
 
@@ -310,14 +311,9 @@ The backend uses **uvicorn's built-in reload** with automatic spec/client genera
 
 ```bash
 # These files do NOT trigger reload:
---reload-exclude "*/openapi.json"
---reload-exclude "*/asyncapi.json"
---reload-exclude "*/clients/*"
---reload-exclude "*/scripts/*"
---reload-exclude "*/.local/*"
---reload-exclude "*/.pids/*"
---reload-exclude "*/__pycache__/*"
---reload-exclude "*.pyc"
+--reload-exclude '**/*__generated/*'
+--reload-exclude '**/__pycache__/*'
+--reload-exclude '**/*.pyc'
 ```
 
 **Manual Client Generation**:
@@ -543,13 +539,27 @@ pytest tests/unit/test_backend_manager*.py -v
 
 ### Integration Tests
 
+Integration tests use a **two-class design** for parallel test execution:
+
 ```bash
 # Full integration suite (slower, ~50s)
 pytest tests/integration/test_backend_manager_integration.py -v
 
-# Specific test
-pytest tests/integration/test_backend_manager_integration.py::TestBackendManagerIntegration::test_01_start_all_servers_successfully -v
+# Read-only tests (module-scoped fixture, servers never stopped)
+pytest tests/integration/test_backend_manager_integration.py::TestBackendManagerReadOnly -v
+
+# Lifecycle tests (function-scoped fixture, fresh per test)
+pytest tests/integration/test_backend_manager_integration.py::TestBackendManagerLifecycle -v
 ```
+
+**Test classes:**
+
+| Class                         | Fixture Scope | Use Case                             |
+| ----------------------------- | ------------- | ------------------------------------ |
+| `TestBackendManagerReadOnly`  | module        | Health checks, endpoint validation   |
+| `TestBackendManagerLifecycle` | function      | Start/stop semantics, error recovery |
+
+See `BACKEND_TESTING.md` Section 4 for detailed patterns.
 
 ### Coverage
 

@@ -31,10 +31,18 @@ protobuf = "5.29.3"
 libcudf-cu12 = "^25.10.0"
 pylibcudf-cu12 = "^25.10.0"
 cudf-cu12 = "^25.10.0"
+# Datastore infrastructure
+psycopg = {extras = ["binary", "pool"], version = "^3.2"}
+pyarrow = "^18.0.0"
+duckdb = "^1.1.0"
+# SQLModel + Alembic (Wave 2B)
+sqlmodel = "^0.0.22"
+alembic = "^1.14.0"
+greenlet = "^3.1.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^7.4.3"
-pytest-asyncio = "^0.21.1"
+pytest = "^8.2"
+pytest-asyncio = "^1.1.0"
 pytest-cov = "^4.1.0"
 httpx = "^0.25.2"
 requests = "^2.31.0"
@@ -56,6 +64,11 @@ types-authlib = "^1.6.6.20251220"
 types-protobuf = "^6.32.1.20251105"
 mypy-protobuf = "^3.7.0"
 grpcio-tools = ">=1.60,<1.70"
+pytest-timeout = "^2.3.1"
+testcontainers = {version = "^4.14", extras = ["postgres"]}
+pytest-testmon = "^2.1.0"
+pytest-xdist = "^3.8.0"
+websockets = "^16.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -95,7 +108,11 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
+# Testmon: Use `make test-changed` or `pytest --testmon` explicitly
+# Not added to addopts to keep regular `make test` unaffected
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+timeout = 10
 testpaths = [
     "tests",
     "tests/integration",
@@ -103,12 +120,16 @@ testpaths = [
 ]
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "postgres: marks tests requiring PostgreSQL (deselect with '-m \"not postgres\"')",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: marks tests as fast unit tests with mocks",
 ]
 # Temporary: passlib 1.7.4 uses deprecated 'crypt' module (removed in Python 3.13)
 # Remove this filter after upgrading to Python 3.13 + passlib 1.8.0+
 # TODO: docs/tmp/python-3.13-upgrade-evaluation.md
+# Temporary: testcontainers 4.14 uses deprecated @wait_container_is_ready internally
+# Remove this filter after testcontainers fixes upstream (tracked in their codebase)
 filterwarnings = [
     "ignore:'crypt' is deprecated:DeprecationWarning",
+    "ignore:The @wait_container_is_ready decorator is deprecated:DeprecationWarning:testcontainers",
 ]

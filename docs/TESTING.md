@@ -25,19 +25,22 @@ Trading Pro uses a multi-tier testing approach that enables independent testing 
 
 ```bash
 cd backend
-make test           # Run all tests (boundaries + providers + modules + integration)
+make test           # Run all tests (incremental with testmon)
+make test-full      # Run all tests (complete suite, no testmon)
 make test-cov       # With coverage report
-make test-modules   # Module tests only
-make test-providers # Provider tests only
-make test-integration # Integration tests only
+make test-modules   # Module tests only (incremental)
+make test-providers # Provider tests only (incremental)
+make test-integration # Integration tests only (incremental)
 ```
+
+> **Note:** All test commands use [pytest-testmon](https://testmon.org/) by default for faster feedback. Add `-full` suffix (e.g., `make test-modules-full`) to run the complete suite. See [backend/docs/BACKEND_TESTING.md](../backend/docs/BACKEND_TESTING.md#incremental-testing-with-pytest-testmon) for details.
 
 ### Test Structure
 
 ```
 backend/
 ├── tests/
-│   ├── conftest.py                    # Global fixtures
+│   ├── conftest.py                    # Global fixtures (test_settings)
 │   ├── unit/                          # Unit tests
 │   │   ├── test_auth_middleware.py
 │   │   ├── test_error_models.py
@@ -45,13 +48,20 @@ backend/
 │   └── integration/                   # Integration tests
 │       ├── conftest.py
 │       ├── test_auth_integration.py
-│       ├── test_broker_equity_computation.py
+│       ├── test_datastore_contract.py     # Contract tests for ALL datastores
+│       ├── test_datastore_integration.py  # Repository integration tests
 │       └── test_provider_integration.py
 │
 ├── src/trading_api/modules/
 │   ├── broker/tests/                  # Module-specific tests
 │   ├── datafeed/tests/
 │   └── auth/tests/
+│
+├── src/trading_api/datastores/
+│   ├── inmemory/tests/
+│   │   └── test_inmemory_specific.py  # InMemory-specific tests
+│   └── postgres/tests/
+│       └── test_postgres_specific.py  # Postgres-specific tests
 │
 └── src/trading_api/providers/
     ├── fakebroker/tests/              # Provider-specific tests
@@ -453,7 +463,7 @@ describe("authService", () => {
     const authService = useAuthService();
 
     vi.spyOn(authService.apiAdapter, "loginWithGoogleToken").mockRejectedValue(
-      new Error("Invalid token")
+      new Error("Invalid token"),
     );
 
     await authService.loginWithGoogleToken("invalid_token");
@@ -606,6 +616,26 @@ jobs:
 - Fast feedback (2-3 minutes total)
 - Clear failure isolation
 
+### Database Testing (Dual-Path Architecture)
+
+PostgreSQL integration tests use different database sources depending on environment:
+
+| Environment | PostgreSQL Source                 | Configuration Source             |
+| ----------- | --------------------------------- | -------------------------------- |
+| **Local**   | testcontainers (auto-provisioned) | `test_settings` fixture          |
+| **CI**      | GitHub Actions service container  | `DATASTORE_POSTGRES_DSN` env var |
+
+**Configuration**: All test settings flow through a session-scoped `test_settings` fixture in `backend/conftest.py`. This fixture:
+
+- Detects CI mode by checking if `DATASTORE_POSTGRES_DSN` is set
+- Spins up testcontainers locally when DSN is not set
+- Enables `DATASTORE_ALLOW_RESET=True` for test isolation
+- Configures minimal pool sizes for efficiency
+
+**Datastore Contract Tests**: Tests in `test_datastore_contract.py` validate that all datastore implementations conform to `TableInterface` and `DatastoreInterface` contracts using parametrized fixtures.
+
+See [backend/docs/BACKEND_TESTING.md](../backend/docs/BACKEND_TESTING.md#5-postgresql-integration-testing) for fixture patterns and implementation details.
+
 ## Test Coverage
 
 ### Backend Coverage
@@ -737,7 +767,7 @@ describe("WebSocket Client", () => {
     await adapter.bars.subscribe(
       "test-listener",
       { symbol: "AAPL", resolution: "1" },
-      callback
+      callback,
     );
 
     expect(callback).toHaveBeenCalled();

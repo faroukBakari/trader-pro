@@ -19,6 +19,7 @@ jobs:
     outputs:
       modules: ${{ steps.discover-modules.outputs.modules }}
       providers: ${{ steps.discover-providers.outputs.providers }}
+      datastores: ${{ steps.discover-datastores.outputs.datastores }}
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -61,6 +62,11 @@ jobs:
       id: discover-providers
       working-directory: backend
       run: echo "providers=$(make list-providers-json)" >> $GITHUB_OUTPUT
+
+    - name: Discover datastores
+      id: discover-datastores
+      working-directory: backend
+      run: echo "datastores=$(make list-datastores-json)" >> $GITHUB_OUTPUT
 
     - name: Generate all specs and clients
       working-directory: backend
@@ -205,9 +211,23 @@ jobs:
         make check-generate-keypair
         make check-generate-hmac-key
 
-    - name: Run ${{ matrix.provider }} provider tests
+    - name: Restore testmon cache
+      uses: actions/cache@v3
+      with:
+        path: backend/.testmondata
+        key: testmon-provider-${{ matrix.provider }}-${{ hashFiles('backend/src/trading_api/providers/${{ matrix.provider }}/**/*.py') }}
+        restore-keys: |
+          testmon-provider-${{ matrix.provider }}-
+
+    - name: Run ${{ matrix.provider }} provider tests (incremental for PRs)
+      if: github.event_name == 'pull_request'
       working-directory: backend
-      run: make test-provider-${{ matrix.provider }}
+      run: poetry run pytest --testmon src/trading_api/providers/${{ matrix.provider }}/tests/ -v
+
+    - name: Run ${{ matrix.provider }} provider tests (full for pushes)
+      if: github.event_name == 'push'
+      working-directory: backend
+      run: poetry run pytest src/trading_api/providers/${{ matrix.provider }}/tests/ -v
 
   # Backend module tests (runs in parallel per module)
   backend-modules:
@@ -250,18 +270,52 @@ jobs:
         make check-generate-keypair
         make check-generate-hmac-key
 
-    - name: Run ${{ matrix.module }} module tests
-      working-directory: backend
-      run: make test-module-${{ matrix.module }}
+    - name: Restore testmon cache
+      uses: actions/cache@v3
+      with:
+        path: backend/.testmondata
+        key: testmon-module-${{ matrix.module }}-${{ hashFiles('backend/src/trading_api/modules/${{ matrix.module }}/**/*.py') }}
+        restore-keys: |
+          testmon-module-${{ matrix.module }}-
 
-  # Backend integration tests (runs once, requires all modules)
-  backend-integration:
+    - name: Run ${{ matrix.module }} module tests (incremental for PRs, skip integration)
+      if: github.event_name == 'pull_request'
+      working-directory: backend
+      run: poetry run pytest --testmon src/trading_api/modules/${{ matrix.module }}/tests/ -v -m "not integration"
+
+    - name: Run ${{ matrix.module }} module tests (full for pushes, skip integration)
+      if: github.event_name == 'push'
+      working-directory: backend
+      run: poetry run pytest src/trading_api/modules/${{ matrix.module }}/tests/ -v -m "not integration"
+
+  # Backend datastore tests (runs in parallel per datastore)
+  backend-datastores:
     runs-on: ubuntu-latest
-    needs: [backend-boundaries, backend-providers-core, backend-providers, backend-modules]
+    needs: [backend-setup]
     if: success()
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11"]
+        datastore: ${{ fromJson(needs.backend-setup.outputs.datastores) }}
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATASTORE_POSTGRES_DSN: ${{ matrix.datastore == 'postgres' && 'postgresql://test:test@localhost:5432/test_db' || '' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -293,9 +347,74 @@ jobs:
         make check-generate-keypair
         make check-generate-hmac-key
 
-    - name: Run all tests with coverage (final report)
+    - name: Run ${{ matrix.datastore }} datastore tests
       working-directory: backend
-      run: make test-integration # make test-cov
+      run: poetry run pytest src/trading_api/datastores/${{ matrix.datastore }}/tests/ -v
+
+  # Backend integration tests (runs once, requires all modules)
+  backend-integration:
+    runs-on: ubuntu-latest
+    needs: [backend-boundaries, backend-providers-core, backend-providers, backend-modules, backend-datastores]
+    if: success()
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATASTORE_POSTGRES_DSN: postgresql://test:test@localhost:5432/test_db
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Restore cached venv
+      uses: actions/cache@v3
+      with:
+        path: |
+          backend/.venv
+          backend/external_packages/tws/source/pythonclient/ibapi/protobuf
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
+        fail-on-cache-miss: false
+
+    - name: Generate keys for tests
+      working-directory: backend
+      run: |
+        make check-generate-keypair
+        make check-generate-hmac-key
+
+    - name: Run integration tests (tests/integration/)
+      working-directory: backend
+      run: make test-integration
+
+    - name: Run module integration tests
+      working-directory: backend
+      run: poetry run pytest src/trading_api/modules/*/tests/ -v -m integration
 
   # Backend spec import and check
   backend-spec-import:

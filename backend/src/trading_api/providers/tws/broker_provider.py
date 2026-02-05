@@ -4,12 +4,14 @@ Implements BrokerCapability with in-memory state and simulated execution.
 All business logic (orders, positions, P&L) is encapsulated here.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 from decimal import Decimal
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from ibapi.contract import Contract
@@ -52,6 +54,9 @@ from trading_api.providers.tws.tws_mappers import (
 )
 from trading_api.shared import Provider
 from trading_api.shared.client_factory import InterModuleClients
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 us_eastern = ZoneInfo("US/Eastern")

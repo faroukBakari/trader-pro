@@ -25,3 +25,6 @@ fastcgi_temp/
 uwsgi_temp/
 scgi_temp/
 **/archive/
+
+# pytest-testmon cache (machine-specific)
+.testmondata

@@ -14,8 +14,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from trading_api.app_factory import AppFactory, ModularApp
+from trading_api.app_factory import ModularApp
 from trading_api.capabilities.datafeed import DatafeedCapability
+from trading_api.datastores import InMemoryDatastore
 from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
@@ -25,7 +26,7 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.shared import FastWSAdapter, Provider
+from trading_api.shared import FastWSAdapter, ModuleRegistry, Provider
 
 
 class MockDatafeedProvider(Provider, DatafeedCapability):
@@ -350,27 +351,44 @@ def apps(mock_datafeed_provider: MockDatafeedProvider) -> ModularApp:
     This prevents tests from connecting to real TWS Gateway.
     Only loads datafeed module to avoid needing mock providers for other modules.
     """
-    factory = AppFactory()
+    from trading_api.shared import ModuleApp, settings
 
-    # Clear and auto-discover modules only (not providers)
-    factory.module_registry.clear()
-    factory.module_registry.auto_discover()
+    # Create module registry for test isolation
+    module_registry = ModuleRegistry(Path(__file__).parents[2])
+
+    # Auto-discover only datafeed module
+    module_registry.auto_discover(enabled_modules=["datafeed"])
 
     # Get only datafeed module with mock provider injected
-    enabled_modules = factory.module_registry.get_modules(
-        module_names=["datafeed"],  # Only datafeed module
+    datastore = InMemoryDatastore()
+    enabled_modules = module_registry.get_modules(
         providers=[mock_datafeed_provider],  # Inject mock provider
+        datastores=[datastore],
     )
 
     # Create ModularApp without lifespan (simpler for tests)
-    modular_app = ModularApp(
-        modules=enabled_modules,
-        base_url="/api",
+    # Use __init__ directly since we're injecting dependencies manually
+    app = ModularApp(
+        base_url=settings.API_PREFIX,
+        enabled_modules=["datafeed"],
         title="Trading API (Test)",
         version="1.0.0",
     )
 
-    return modular_app
+    # Manually set runtime state (normally done in build_modules)
+    app._modules = enabled_modules
+    app._modules_apps = [ModuleApp(module) for module in enabled_modules]
+
+    # Mount module routes (normally done in _start)
+    for module_app in app._modules_apps:
+        for api_app in module_app.api_versions:
+            mount_path = f"{app.base_url}/{api_app.version}/{module_app.module.name}"
+            app.mount(mount_path, api_app)
+
+        # Start module
+        module_app.start()
+
+    return app
 
 
 @pytest.fixture(scope="module")

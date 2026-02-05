@@ -4,7 +4,7 @@ Tests that verify all modules work correctly together.
 """
 
 import time
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from fastapi import FastAPI
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 def receive_message_by_type(
     websocket: Any, expected_type: str, timeout: float = 5.0
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Receive WebSocket messages until we get one with the expected type.
 
     This helper function handles the race condition where background tasks

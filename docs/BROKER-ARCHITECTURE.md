@@ -8,7 +8,7 @@
 - `backend/src/trading_api/models/broker/` - Broker domain models
 - `backend/src/trading_api/capabilities/broker.py` - BrokerCapability interface
 
-> **Note**: This document describes the **FakebrokerProvider** - a mock broker for development and testing.
+> **Note**: This document describes the **FakeBrokerProvider** - a mock broker for development and testing.
 > The actual broker module at `backend/src/trading_api/modules/broker/` is a BFF (Backend-For-Frontend) layer
 > that delegates to this provider. See [broker module README](../backend/src/trading_api/modules/broker/README.md).
 
@@ -16,7 +16,7 @@
 
 ## Overview
 
-The `FakebrokerProvider` implements a **realistic trading broker simulation** with automatic order execution, position management, and equity tracking. It follows an **event-driven architecture** using a single execution simulator loop that triggers cascading updates across all business objects.
+The `FakeBrokerProvider` implements a **realistic trading broker simulation** with automatic order execution, position management, and equity tracking. It follows an **event-driven architecture** using a single execution simulator loop that triggers cascading updates across all business objects.
 
 **Key Design Principles:**
 
@@ -32,7 +32,7 @@ The `FakebrokerProvider` implements a **realistic trading broker simulation** wi
 ### 1. Core Data Structures
 
 ```python
-class FakebrokerProvider(Provider, BrokerCapability):
+class FakeBrokerProvider(Provider, BrokerCapability):
     # Business State (In-Memory)
     _orders: dict[str, PlacedOrder]           # order_id → PlacedOrder
     _positions: dict[str, Position]           # symbol → Position
@@ -537,15 +537,15 @@ from trading_api.models.providers.fake_broker_configs import FakeBrokerProviderC
 
 # Production: Random 1-2 second intervals (default)
 config = FakeBrokerProviderConfig()
-provider = FakebrokerProvider(config)
+provider = FakeBrokerProvider(config)
 
 # Fast testing: 100ms intervals
 config = FakeBrokerProviderConfig(execution_delay=0.1)
-provider = FakebrokerProvider(config)
+provider = FakeBrokerProvider(config)
 
 # Disabled automatic execution (manual trigger only)
 config = FakeBrokerProviderConfig(execution_delay=None)
-provider = FakebrokerProvider(config)
+provider = FakeBrokerProvider(config)
 ```
 
 ### Testing Execution Cascade
@@ -554,7 +554,7 @@ provider = FakebrokerProvider(config)
 async def test_execution_cascade():
     """Test that execution triggers all updates in correct order"""
     config = FakeBrokerProviderConfig(execution_delay=None)  # Manual control
-    provider = FakebrokerProvider(config)
+    provider = FakeBrokerProvider(config)
 
     # Track callback invocations
     callbacks = {
@@ -603,7 +603,7 @@ async def test_execution_cascade():
 async def test_simulator_lifecycle():
     """Test automatic start/stop of execution simulator"""
     config = FakeBrokerProviderConfig(execution_delay=0.1)
-    provider = FakebrokerProvider(config)
+    provider = FakeBrokerProvider(config)
 
     # Initially no simulator
     assert provider._execution_simulator_task is None
@@ -654,7 +654,7 @@ async def executions_updates(self) -> Execution:
 **Direct Callbacks:**
 
 ```python
-self._update_callbacks: Dict[str, Callable] = {}
+self._update_callbacks: dict[str, Callable] = {}
 
 if "executions" in self._update_callbacks:
     self._update_callbacks["executions"](execution)  # Direct call
@@ -675,7 +675,7 @@ if "executions" in self._update_callbacks:
 ### Multi-Account Support
 
 ```python
-class FakebrokerProvider(Provider, BrokerCapability):
+class FakeBrokerProvider(Provider, BrokerCapability):
     def __init__(self, config: FakeBrokerProviderConfig | None = None):
         # Multi-account storage
         self._accounts: dict[str, BrokerAccount] = {}
@@ -694,7 +694,7 @@ class FakebrokerProvider(Provider, BrokerCapability):
 ### Datafeed Integration
 
 ```python
-class FakebrokerProvider(Provider, BrokerCapability):
+class FakeBrokerProvider(Provider, BrokerCapability):
     def __init__(
         self,
         config: FakeBrokerProviderConfig | None = None,
