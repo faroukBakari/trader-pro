@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from trading_api.datastores import InMemoryDatastore
+from trading_api.datastores import InMemoryDatastore, PostgresDatastore
 from trading_api.models.market import Bar, Resolution, SearchSymbolResultItem
 from trading_api.modules.datafeed.service import DatafeedService
+from trading_api.shared.config import Settings
 
 from .conftest import MockDatafeedProvider
 
@@ -29,6 +30,28 @@ def service(mock_provider: MockDatafeedProvider) -> DatafeedService:
     return DatafeedService(
         module_dir, providers=[mock_provider], datastores=[datastore]
     )
+
+
+@pytest.fixture
+async def cached_service(
+    test_settings: Settings, mock_provider: MockDatafeedProvider
+) -> DatafeedService:
+    """Create DatafeedService with PostgresDatastore for caching tests.
+
+    This fixture provides full read-through cache functionality:
+    - BarRepository for persistent bar storage
+    - BarCacheManager for gap detection and pending range locking
+    """
+    datastore = await PostgresDatastore.create(config=test_settings)
+    module_dir = Path(__file__).parent.parent
+    svc = DatafeedService(module_dir, providers=[mock_provider], datastores=[datastore])
+    # Clear cache state for clean tests
+    if svc._cache_manager:
+        await svc._cache_manager.clear()
+    if svc._bar_repository:
+        # Clear any existing bar data
+        pass  # Tables are per-symbol, created on demand
+    return svc
 
 
 @pytest.mark.asyncio
@@ -232,3 +255,261 @@ async def test_get_bars_applies_count_back_filter(
     # Should return only last 3 bars
     assert len(results) == 3
     assert results == mock_bars[-3:]
+
+
+# =============================================================================
+# Cache Integration Tests (PostgresDatastore)
+# =============================================================================
+
+
+class TestGetBarsCaching:
+    """Integration tests for DatafeedService read-through cache orchestration.
+
+    These tests verify the full caching pipeline:
+    - Gap detection via BarCacheManager.find_missing_ranges()
+    - Pending range locking via try_add_pending()
+    - Provider fetch for uncached ranges
+    - Storage via BarRepository
+    - Coverage tracking via mark_covered()
+
+    Uses PostgresDatastore for real exclusion constraint behavior.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cache_bypass_with_inmemory_datastore(
+        self, service: DatafeedService, mock_provider: MockDatafeedProvider
+    ) -> None:
+        """Test that InMemoryDatastore bypasses cache (no exclusion capability)."""
+        # Arrange: Configure provider to return bars
+        mock_bars = [
+            Bar(
+                time=1000,
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.5,
+                volume=1000,
+                count=None,
+            )
+        ]
+        mock_provider.return_values["get_historical_bars"] = mock_bars
+
+        # Verify service has no cache_manager with InMemoryDatastore
+        assert service._cache_manager is None
+
+        # Act: First call
+        await service.get_bars(
+            ticker="TEST",
+            resolution=Resolution.DAY_1,
+            from_time=0,
+            to_time=100000,
+            count_back=None,
+        )
+
+        # Act: Second identical call
+        await service.get_bars(
+            ticker="TEST",
+            resolution=Resolution.DAY_1,
+            from_time=0,
+            to_time=100000,
+            count_back=None,
+        )
+
+        # Assert: Provider called BOTH times (no caching)
+        assert len(mock_provider.calls["get_historical_bars"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_cache_miss_fetches_and_stores(
+        self, cached_service: DatafeedService, mock_provider: MockDatafeedProvider
+    ) -> None:
+        """Test cache miss triggers provider fetch and stores result."""
+        # Arrange: Configure provider to return bars
+        mock_bars = [
+            Bar(
+                time=1000,
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.5,
+                volume=1000,
+                count=None,
+            ),
+            Bar(
+                time=2000,
+                open=100.5,
+                high=102.0,
+                low=100.0,
+                close=101.5,
+                volume=1500,
+                count=None,
+            ),
+        ]
+        mock_provider.return_values["get_historical_bars"] = mock_bars
+
+        # Act: First request (cache miss)
+        results = await cached_service.get_bars(
+            ticker="CACHE_MISS",
+            resolution=Resolution.DAY_1,
+            from_time=0,
+            to_time=10000,
+            count_back=None,
+        )
+
+        # Assert: Provider was called
+        assert len(mock_provider.calls["get_historical_bars"]) == 1
+        # Assert: Bars returned
+        assert len(results) == 2
+        assert results[0].time == 1000
+        assert results[1].time == 2000
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_provider(
+        self, cached_service: DatafeedService, mock_provider: MockDatafeedProvider
+    ) -> None:
+        """Test cache hit returns data without calling provider."""
+        # Arrange: Configure provider to return bars
+        mock_bars = [
+            Bar(
+                time=5000,
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.5,
+                volume=1000,
+                count=None,
+            ),
+        ]
+        mock_provider.return_values["get_historical_bars"] = mock_bars
+
+        # First request populates cache
+        await cached_service.get_bars(
+            ticker="CACHE_HIT",
+            resolution=Resolution.MIN_1,
+            from_time=0,
+            to_time=10000,
+            count_back=None,
+        )
+        assert len(mock_provider.calls["get_historical_bars"]) == 1
+
+        # Act: Second identical request (cache hit)
+        results = await cached_service.get_bars(
+            ticker="CACHE_HIT",
+            resolution=Resolution.MIN_1,
+            from_time=0,
+            to_time=10000,
+            count_back=None,
+        )
+
+        # Assert: Provider NOT called again
+        assert len(mock_provider.calls["get_historical_bars"]) == 1
+        # Assert: Bars still returned from cache
+        assert len(results) == 1
+        assert results[0].time == 5000
+
+    @pytest.mark.asyncio
+    async def test_partial_cache_fills_gaps_only(
+        self, cached_service: DatafeedService, mock_provider: MockDatafeedProvider
+    ) -> None:
+        """Test partial cache hit fetches only missing ranges."""
+        # Arrange: First request covers 0-10000
+        first_bars = [
+            Bar(
+                time=5000,
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.5,
+                volume=1000,
+                count=None,
+            ),
+        ]
+        mock_provider.return_values["get_historical_bars"] = first_bars
+
+        await cached_service.get_bars(
+            ticker="PARTIAL",
+            resolution=Resolution.MIN_1,
+            from_time=0,
+            to_time=10000,
+            count_back=None,
+        )
+        assert len(mock_provider.calls["get_historical_bars"]) == 1
+
+        # Arrange: Second request extends range to 20000
+        second_bars = [
+            Bar(
+                time=15000,
+                open=101.0,
+                high=102.0,
+                low=100.5,
+                close=101.5,
+                volume=1200,
+                count=None,
+            ),
+        ]
+        mock_provider.return_values["get_historical_bars"] = second_bars
+
+        # Act: Request 0-20000 (0-10000 cached, 10000-20000 gap)
+        results = await cached_service.get_bars(
+            ticker="PARTIAL",
+            resolution=Resolution.MIN_1,
+            from_time=0,
+            to_time=20000,
+            count_back=None,
+        )
+
+        # Assert: Provider called for gap only
+        assert len(mock_provider.calls["get_historical_bars"]) == 2
+        second_call = mock_provider.calls["get_historical_bars"][1]
+        # Gap should start at 10000 (exclusive of first range)
+        assert second_call["start_time"].timestamp() * 1000 >= 10000
+
+        # Assert: Combined results returned
+        assert len(results) == 2
+        times = [bar.time for bar in results]
+        assert 5000 in times
+        assert 15000 in times
+
+    @pytest.mark.asyncio
+    async def test_count_back_applied_after_cache_retrieval(
+        self, cached_service: DatafeedService, mock_provider: MockDatafeedProvider
+    ) -> None:
+        """Test count_back filter applies to cached + fetched data."""
+        # Arrange: Provider returns 10 bars
+        mock_bars = [
+            Bar(
+                time=i * 1000,
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.5,
+                volume=1000,
+                count=None,
+            )
+            for i in range(10)
+        ]
+        mock_provider.return_values["get_historical_bars"] = mock_bars
+
+        # Populate cache
+        await cached_service.get_bars(
+            ticker="COUNTBACK",
+            resolution=Resolution.MIN_1,
+            from_time=0,
+            to_time=10000,
+            count_back=None,
+        )
+
+        # Act: Request with count_back=3 (from cache)
+        results = await cached_service.get_bars(
+            ticker="COUNTBACK",
+            resolution=Resolution.MIN_1,
+            from_time=0,
+            to_time=10000,
+            count_back=3,
+        )
+
+        # Assert: Only 3 most recent bars returned
+        assert len(results) == 3
+        # Last 3 bars: time 7000, 8000, 9000
+        assert results[0].time == 7000
+        assert results[1].time == 8000
+        assert results[2].time == 9000

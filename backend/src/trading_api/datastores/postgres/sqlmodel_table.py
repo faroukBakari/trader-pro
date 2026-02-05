@@ -21,6 +21,7 @@ Dynamic Table Support:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, TypeVar, cast
@@ -85,6 +86,7 @@ class SQLModelTable(TableInterface[T]):
         self._pk = primary_key
         self._pk_col = getattr(model_class, primary_key)
         self._initialized = False
+        self._init_lock = asyncio.Lock()  # Serialize table creation
         self._table_name: str | None = None
 
         # Extract SQLAlchemy Table for targeted create_all
@@ -270,33 +272,38 @@ class SQLModelTable(TableInterface[T]):
         if self._initialized:
             return
 
-        sa_table = self._sa_table
-        if sa_table is None:
-            logger.warning(
-                f"Cannot auto-create table for {self._model.__name__}: "
-                "no SQLAlchemy table mapping found"
-            )
+        async with self._init_lock:
+            # Double-check after acquiring lock (another coroutine may have initialized)
+            if self._initialized:
+                return  # type: ignore[unreachable]
+
+            sa_table = self._sa_table
+            if sa_table is None:
+                logger.warning(
+                    f"Cannot auto-create table for {self._model.__name__}: "
+                    "no SQLAlchemy table mapping found"
+                )
+                self._initialized = True
+                return
+
+            table_name = getattr(sa_table, "name", self._model.__name__)
+
+            async with self._session_factory() as session:
+                conn = await session.connection()
+
+                # Step 1: Create table
+                await conn.run_sync(
+                    lambda sync_conn: sa_table.create(sync_conn, checkfirst=True)
+                )
+
+                # Step 2: Create GiST indexes for detected range columns
+                for col_name in self._gist_index_columns:
+                    await self._create_gist_index(conn, table_name, col_name)
+
+                await session.commit()  # DDL needs explicit commit
+
+            logger.debug(f"Ensured table exists: {table_name}")
             self._initialized = True
-            return
-
-        table_name = getattr(sa_table, "name", self._model.__name__)
-
-        async with self._session_factory() as session:
-            conn = await session.connection()
-
-            # Step 1: Create table
-            await conn.run_sync(
-                lambda sync_conn: sa_table.create(sync_conn, checkfirst=True)
-            )
-
-            # Step 2: Create GiST indexes for detected range columns
-            for col_name in self._gist_index_columns:
-                await self._create_gist_index(conn, table_name, col_name)
-
-            await session.commit()  # DDL needs explicit commit
-
-        logger.debug(f"Ensured table exists: {table_name}")
-        self._initialized = True
 
     async def get(
         self,

@@ -5,7 +5,6 @@ Manages pending and covered ranges to support gap detection and
 prevent duplicate provider requests.
 
 Public API (minimal surface):
-- create() - Factory method
 - try_add_pending() - Atomically acquire a pending range (exclusion constraint)
 - mark_covered() - Complete fetch: remove pending, add covered (atomic)
 - find_missing_ranges() - Gap detection for cache-first pattern
@@ -21,11 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import CoveredRange, PendingRange, Resolution, TimeRange
-from trading_api.shared.config import Settings
 from trading_api.shared.datastore_interface import (
     DatastoreInterface,
     RangeQueryTableInterface,
-    TableInterface,
 )
 from trading_api.types import IntRange, StorageType
 
@@ -60,28 +57,20 @@ class BarCacheManager:
     [MEMORY]: Metadata only - actual bar storage is in BarRepository.
     """
 
-    # Convention: Use a class-level variable as a "key"
-    _AUTH_KEY = object()
-
     def __init__(
         self,
-        key: object,
         datastore: DatastoreInterface,
         pending_ttl_ms: int,
     ) -> None:
         """Initialize cache manager.
 
         Args:
-            datastore: DatastoreInterface for persistence
+            datastore: DatastoreInterface with exclusion, transactions, rangequery capabilities
             pending_ttl_ms: Time-to-live for pending ranges in milliseconds
-        """
-        # Prevent direct instantiation
-        if key is not self._AUTH_KEY:
-            raise TradingApiException(
-                code="BAR_CACHE_MANAGER_INIT_FORBIDDEN",
-                message="Use BarCacheManager.create() to instantiate",
-            )
 
+        Raises:
+            TradingApiException: If datastore lacks required capabilities
+        """
         if not datastore.has_capability("exclusion"):
             raise TradingApiException(
                 code="BAR_CACHE_MANAGER_NO_EXCLUSION_SUPPORT",
@@ -102,43 +91,22 @@ class BarCacheManager:
 
         self._pending_ttl_ms = pending_ttl_ms
         self._datastore = datastore
-        self._pending_table: TableInterface[PendingRange] | None = None
-        self._covered_table: TableInterface[CoveredRange] | None = None
-        self._rangequery_table: RangeQueryTableInterface[CoveredRange] | None = None
-
-    @classmethod
-    async def create(
-        cls,
-        datastore: DatastoreInterface,
-        settings: Settings,
-    ) -> "BarCacheManager":
-        """Factory method to create BarCacheManager instance."""
-        return cls(
-            key=cls._AUTH_KEY,
-            datastore=datastore,
-            pending_ttl_ms=settings.BAR_CACHE_PENDING_TTL_MS,
-        )
+        self._pending_table: RangeQueryTableInterface[PendingRange] | None = None
+        self._covered_table: RangeQueryTableInterface[CoveredRange] | None = None
 
     @property
-    def pending_table(self) -> TableInterface[PendingRange]:
+    def pending_table(self) -> RangeQueryTableInterface[PendingRange]:
         """Get or create the pending ranges table."""
         if self._pending_table is None:
-            self._pending_table = self._datastore.table(PendingRange)
+            self._pending_table = self._datastore.rangequery_table(PendingRange)
         return self._pending_table
 
     @property
-    def covered_table(self) -> TableInterface[CoveredRange]:
+    def covered_table(self) -> RangeQueryTableInterface[CoveredRange]:
         """Get or create the covered ranges table."""
         if self._covered_table is None:
-            self._covered_table = self._datastore.table(CoveredRange)
+            self._covered_table = self._datastore.rangequery_table(CoveredRange)
         return self._covered_table
-
-    @property
-    def rangequery_table(self) -> RangeQueryTableInterface[CoveredRange]:
-        """Get or create the rangequery table for gap detection."""
-        if self._rangequery_table is None:
-            self._rangequery_table = self._datastore.rangequery_table(CoveredRange)
-        return self._rangequery_table
 
     @property
     def _session_factory(self) -> async_sessionmaker[AsyncSession]:
@@ -302,7 +270,7 @@ class BarCacheManager:
         lookup_key = _lookup_key(symbol, resolution)
         query_range = IntRange(start=from_time, end=to_time)
 
-        gaps = await self.rangequery_table.get_missing_ranges(
+        gaps = await self.covered_table.get_missing_ranges(
             lookup_key=lookup_key,
             query_range=query_range,
         )
