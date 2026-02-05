@@ -1,7 +1,7 @@
 ```prompt
 ---
 agent: "agent"
-model: "Claude Opus 4.5"
+model: "Claude Sonnet 4.5"
 name: "implement"
 description: "Implementation-focused development with structured planning, codebase awareness, and test-driven execution."
 ---

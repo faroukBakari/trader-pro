@@ -1,6 +1,6 @@
 ---
 agent: "agent"
-model: "Claude Opus 4.5"
+model: "Claude Sonnet 4.5"
 name: "typo-fix-v1"
 description: "Systematically resolve mypy/pyright type errors while preserving behavior and optimizing imports."
 ---
