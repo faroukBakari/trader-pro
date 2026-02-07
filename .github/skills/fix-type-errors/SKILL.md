@@ -1,6 +1,6 @@
 ---
 name: fix-type-errors
-description: Systematic type error resolution for Python (mypy/pyright) and TypeScript (vue-tsc). Use when fixing typo errors, resolving type check failures, or optimizing type imports.
+description: Systematic type error resolution for Python (mypy/pyright) and TypeScript (vue-tsc). Use when fixing type errors, resolving type check failures, or optimizing type imports.
 ---
 
 # Type Error Resolution

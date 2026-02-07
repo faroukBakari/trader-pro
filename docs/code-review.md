@@ -1,6 +1,6 @@
 ---
 agent: "agent"
-model: "Claude Opus 4.5"
+model: "Claude Opus 4.6"
 name: "ask"
 description: "High-level technical consultation and project analysis without implementation."
 ---
