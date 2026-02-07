@@ -1,10 +1,12 @@
 {
 	"servers": {
-		"microsoft/playwright-mcp": {
+		"playwright": {
 			"type": "stdio",
 			"command": "npx",
 			"args": [
-				"@playwright/mcp@latest"
+				"@playwright/mcp@latest",
+				"--console-level=info", // Capture console.log/warn/error
+				"--save-trace" // Save Playwright traces for post-mortem
 			],
 		}
 	},

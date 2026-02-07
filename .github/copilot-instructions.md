@@ -285,6 +285,7 @@ Before complex tasks, consider whether a specialist agent could achieve better r
 | `multi-edit` | Coordinated multi-file editing, batch apply/derive (subagent) | Delegated for FinOps-efficient batch code editing with lightweight verification |
 | `command` | Large-output command execution, parallel runs, daemon management (subagent) | Delegated for env-aware terminal execution with full output capture and cleanup |
 | `verify` | Multi-file verification with pass/fail verdicts (subagent) | Delegated for mid-complexity checks, multi-file validation, and command-based verification with structured verdict reports |
+| `playwright` | Browser automation via Playwright MCP (subagent) | Delegated for UI inspection, interaction, debugging, and visual verification with lean result extraction |
 
 ### Quick Decision Rules
 
@@ -305,4 +306,5 @@ Before complex tasks, consider whether a specialist agent could achieve better r
 14. **Multi-file batch edits?** → `multi-edit` subagent for coordinated changes
 15. **Large output or parallel commands?** → `command` subagent for isolated terminal execution with full capture
 16. **Need multi-file verification with verdicts?** → `verify` subagent for structured pass/fail checks across files and commands
+17. **Need browser/UI inspection or interaction?** → `playwright` subagent for isolated browser automation with lean results
 

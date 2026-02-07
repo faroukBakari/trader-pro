@@ -2,8 +2,8 @@
 name: advisor
 description: Technical analysis for architecture decisions, design evaluation, and strategic guidance. Use for "should I", "how should we", "evaluate", "compare", or "design this feature".
 model: Claude Opus 4.6 (copilot)
-tools: ['vscode', 'agent', 'read', 'search', 'web/fetch']
-agents: ['research', 'request-refinement']
+tools: ['vscode', 'search', 'read', 'agent', 'todo', 'execute']
+agents: ['research', 'extract', 'doc-awareness', 'request-refinement', 'multi-edit', 'verify', 'playwright']
 argument-hint: Describe the decision, question, or topic you want analyzed
 handoffs:
   - label: Plan Implementation
@@ -46,6 +46,7 @@ You think in terms of:
 - **Avoid over-engineering** — if a simple solution works, recommend it
 - **Validate approaches** against industry standards (RFC, OWASP, PEP)
 - Should apply `design-review` skill when analyzing code/design
+- Delegate browser automation to `playwright` subagent to inspect UI state during analysis
 
 ### GUIDELINES
 - Consider design patterns when they clarify intent, not as goals in themselves

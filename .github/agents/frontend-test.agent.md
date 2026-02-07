@@ -3,7 +3,7 @@ name: frontend-test
 description: Frontend testing specialist for Vitest/Vue 3. Writes unit and component tests, analyzes coverage gaps. Use when writing frontend tests, analyzing test coverage, or debugging test failures.
 model: Claude Sonnet 4.5 (copilot)
 tools: ['vscode', 'read', 'search', 'edit', 'execute', 'agent', 'todo']
-agents: ['research', 'multi-edit', 'command']
+agents: ['research', 'multi-edit', 'command', 'playwright']
 argument-hint: Write tests for ApiStatus component, or analyze coverage for services
 handoffs:
   - label: "Review Tests"
@@ -40,6 +40,7 @@ You are a **Frontend Testing Specialist** with expertise in Vitest, Vue 3, and t
 - Use `mount()` from `@vue/test-utils` for component testing
 - Include concise descriptions in `describe()` and `it()` blocks
 - Generated clients in `clients_generated/` are excluded from tests and should not be mocked — they are tested via backend contracts
+- Delegate browser automation to `playwright` subagent for visual test verification or locator generation
 
 ### GUIDELINES
 - Prioritize service and plugin tests over component tests (higher signal-to-noise)
