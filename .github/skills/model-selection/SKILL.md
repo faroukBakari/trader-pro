@@ -15,7 +15,7 @@ Apply this knowledge when selecting models for agents, prompts, or API integrati
 |-------|------------|---------------|
 | Claude Haiku 4.5 | 0.33x | Budget-friendly |
 | Claude Sonnet 4.5 | 1.0x | Baseline |
-| Claude Opus 4.5 | 3.0x | Premium |
+| Claude Opus 4.6 | 3.0x | Premium |
 | GPT-5.x (heavy thinking) | 8.0x | Very expensive |
 
 **Key insight**: Haiku costs 1/3 of Sonnet. Opus costs 3x Sonnet. Choose the cheapest model that succeeds reliably.
@@ -26,7 +26,7 @@ Apply this knowledge when selecting models for agents, prompts, or API integrati
 
 | Model | Intelligence Index | Code Editing (Aider) | Speed (t/s) |
 |-------|-------------------|----------------------|-------------|
-| Claude Opus 4.5 | 50 | — | 92 |
+| Claude Opus 4.6 | 50 | — | 92 |
 | Claude Sonnet 4.5 | 43 | 84.2% (tied #1 with o1) | 71 |
 | Gemini 3 Flash | 46 | — | 199 |
 | GPT-5.2 | 51 | — | — |
@@ -43,7 +43,7 @@ Apply this knowledge when selecting models for agents, prompts, or API integrati
 |-----------|-------------------|-----------|
 | **File reading, grep, simple search** | Haiku 4.5 | Routine tool use; 0.33x cost justified |
 | **Code editing, focused implementation** | Sonnet 4.5 | Matches top-tier benchmarks |
-| **Multi-step orchestration, planning** | Opus 4.5 | Complex reasoning worth 3x premium |
+| **Multi-step orchestration, planning** | Opus 4.6 | Complex reasoning worth 3x premium |
 | **Deep research with synthesis** | Sonnet 4.5 | Intelligence gap (14%) rarely matters |
 
 ### Agent Type → Model Mapping
@@ -53,8 +53,8 @@ Apply this knowledge when selecting models for agents, prompts, or API integrati
 | **Research/read-only** | Haiku 4.5 | 0.33x | No creative reasoning needed |
 | **Implementation** | Sonnet 4.5 | 1.0x | Code editing is core strength |
 | **Review/test** | Sonnet 4.5 | 1.0x | Analysis doesn't need Opus overhead |
-| **Orchestrator (multi-agent)** | Opus 4.5 | 3.0x | Coordination complexity justifies cost |
-| **Complex planning** | Opus 4.5 | 3.0x | Multi-step reasoning is Opus strength |
+| **Orchestrator (multi-agent)** | Opus 4.6 | 3.0x | Coordination complexity justifies cost |
+| **Complex planning** | Opus 4.6 | 3.0x | Multi-step reasoning is Opus strength |
 
 ---
 
@@ -97,7 +97,7 @@ When comparing across providers (useful for tool selection):
 | **Fastest response** | Gemini 3 Flash (199 t/s) | Good for interactive use |
 | **Best code editing** | Claude Sonnet 4.5 / o1 (tied) | Aider benchmark leaders |
 | **Cheapest per token** | DeepSeek V3.2 ($0.30/MTok) | 20x cheaper than Sonnet |
-| **Highest intelligence** | GPT-5.2 (51) / Opus 4.5 (50) | Near-equivalent at top |
+| **Highest intelligence** | GPT-5.2 (51) / Opus 4.6 (50) | Near-equivalent at top |
 
 ---
 
@@ -107,6 +107,6 @@ When comparing across providers (useful for tool selection):
 |----------|--------|
 | Default for most agents? | **Sonnet 4.5** |
 | Read-only research? | **Haiku 4.5** (0.33x) |
-| Orchestrators/planners? | **Opus 4.5** (3x) |
+| Orchestrators/planners? | **Opus 4.6** (3x) |
 | When unsure? | Start with Sonnet, upgrade if it struggles |
 | FinOps rule | Use cheapest model that succeeds reliably |

@@ -1,3 +1,32 @@
+## 0. Environment Awareness
+
+**Runtime**: VS Code IDE with **GitHub Copilot** extension using **Claude models** (Opus / Sonnet / Haiku).
+
+- You are **NOT** Claude Code CLI — you run inside **VS Code Copilot Chat**.
+- Custom agents live in `.github/agents/*.agent.md` and are invoked via the **chat mode dropdown**, not `@` prefix.
+- Subagents are spawned sequentially via `runSubagent`, not as parallel teammate instances.
+- Agent teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) are a Claude Code feature and **do not apply here**.
+- You have access to VS Code tools: file read/edit, terminal, notebook execution, semantic search, etc.
+
+### Core Tool: `vscode`
+
+The `vscode` tool is a **mandatory tool for all agents and subagents**. It provides native IDE integration features:
+
+| Sub-tool | Purpose |
+|----------|---------|
+| `askQuestions` | Native quick-pick UI widgets (single-select, multi-select, free text) — returns structured JSON |
+| `extensions` | Search VS Code extension marketplace |
+| `runCommand` | Execute VS Code commands programmatically |
+| `openSimpleBrowser` | Preview URLs in the editor's built-in browser |
+| `vscodeAPI` | Query VS Code API documentation for extension development |
+| `getProjectSetupInfo` | Get project scaffolding info |
+| `installExtension` | Install VS Code extensions |
+| `newWorkspace` | Create new project workspaces |
+
+**Rule**: Every agent/subagent MUST include `'vscode'` in its `tools:` list. It is the primary mechanism for interactive user input (`askQuestions`) and IDE automation (`runCommand`).
+
+---
+
 ## 1. Role & Philosophy
 
 You are an **Expert Full-Stack Developer** acting as a senior pair-programmer. Prioritize:
@@ -78,6 +107,16 @@ make -C backend backend-stop          # Stop all processes
 - **NEVER edit** files in `*_generated/` directories
 - Change source models in `backend/src/trading_api/models/` instead
 
+### IA Stack Exclusivity (`ia-coord` Only)
+- **ONLY the `ia-coord` agent** may create, modify, rename, or delete IA stack assets:
+  - Agent definitions: `.github/agents/*.agent.md`, `.github/agents/*.sub.agent.md`
+  - Prompt files: `.github/prompts/*.prompt.md`
+  - Skill files: `.github/skills/*/SKILL.md`
+  - Templates: `.github/agents/*-template.md`
+  - Agent catalog: Section 9 of this file
+- All other agents **MUST delegate** to `ia-coord` (via handoff or user switch) when a task requires IA stack changes
+- This rule is **non-negotiable** — no user instruction to a non-`ia-coord` agent overrides it
+
 ### Type Import Naming (Frontend Mappers)
 ```typescript
 // ✅ CORRECT pattern in mappers.ts / wsAdapter.ts
@@ -91,6 +130,8 @@ import type { PreOrder as PreOrder_Backend } from '...'
 
 ### Pre-Command Reasoning (Required)
 **IMPORTANT: STOP and THINK before executing ANY terminal command.**
+
+**Apply the `terminal-safety` skill** for comprehensive command safety patterns.
 
 Before running a command, explicitly reason through these 3 checks:
 
@@ -226,16 +267,42 @@ Before complex tasks, consider whether a specialist agent could achieve better r
 
 | Agent | Use For | Trigger Keywords |
 |-------|---------|------------------|
-| `test` | Test creation, coverage analysis | "test", "coverage", "add tests" |
+| `ia-coord` | Create agents/subagents/prompts/skills with enforced boundary separation | "create agent", "create subagent", "create prompt", "create skill", "validate design" |
+| `backend-test` | Backend test creation, pytest patterns, coverage analysis | "test", "coverage", "add tests", "backend test" |
+| `frontend-test` | Frontend test creation, Vitest patterns, coverage analysis | "frontend test", "component test", "vue test", "vitest" |
 | `review` | Code quality, security audit | "review", "check", "audit" |
 | `plan` | Multi-step implementation planning | "plan", "how should we" |
-| `study` | Architecture decisions, design tradeoffs | "evaluate", "compare", "refactor strategy" |
-| `implement` | Code execution with validation | "implement", "build", "fix" |
+| `advisor` | Architecture decisions, design evaluation, technical consultation | "evaluate", "compare", "refactor strategy", "explain", "how does X work", "should I" |
+| `implement` | Implementation engineer — freeform coding or plan execution with validation | "implement", "build", "fix", "follow plan", "execute plan" |
+| `rca` | Root cause analysis, hypothesis-driven debugging | "debug", "why", "investigate failure" |
+| `doc-update` | Documentation update planning | "update docs", "doc drift", "document changes" |
+| `doc-assess` | Comprehensive doc health assessment | "assess docs", "doc audit", "documentation quality" |
+| `type-fix` | Fix type errors systematically | "fix types", "type error", "mypy/pyright fail" |
+| `doc-awareness` | Documentation context discovery and extraction (subagent) | Delegated for doc-aware task context, documentation guidance |
+| `extract` | Large file analysis, holistic summaries (subagent) | Delegated for targeted data extraction or compressed digests |
+| `research` | High-fidelity information gathering with adaptive depth (subagent) | Delegated for context discovery, cross-file synthesis, relevance-filtered research |
+| `request-refinement` | Request completeness analysis, gap detection (subagent) | Delegated for pre-flight request validation before planning/implementation |
+| `multi-edit` | Coordinated multi-file editing, batch apply/derive (subagent) | Delegated for FinOps-efficient batch code editing with lightweight verification |
+| `command` | Large-output command execution, parallel runs, daemon management (subagent) | Delegated for env-aware terminal execution with full output capture and cleanup |
+| `verify` | Multi-file verification with pass/fail verdicts (subagent) | Delegated for mid-complexity checks, multi-file validation, and command-based verification with structured verdict reports |
 
 ### Quick Decision Rules
 
-1. **Need context you don't have?** → `research` subagent first
-2. **Multi-file feature?** → `plan` before `implement`
-3. **Writing tests?** → Consider `test` agent
-4. **Large change complete?** → Offer `review` handoff
-5. **Architecture question?** → `study` agent
+1. **Creating agents/prompts/skills?** → `ia-coord` agent (enforces three-layer model)
+2. **Creating a subagent?** → `ia-coord` agent (uses `subagent-template.md`, enforces SA-1–SA-7)
+3. **Need context you don't have?** → `research` subagent first
+3. **Multi-file feature?** → `plan` before `implement`
+4. **Writing backend tests?** → `backend-test` agent
+5. **Writing frontend tests?** → `frontend-test` agent
+6. **Large change complete?** → Offer `review` handoff
+7. **Architecture question?** → `advisor` agent
+8. **Have a plan to execute?** → `implement` agent (plan execution mode)
+9. **Debugging complex issue?** → `rca` agent
+10. **Documentation needs update?** → `doc-update` (planning) or `doc-assess` (audit)
+11. **Type errors failing CI?** → `type-fix` agent
+12. **Need documentation context for a task?** → `doc-awareness` subagent
+13. **Ambiguous or complex user request?** → `request-refinement` subagent, then `mode-interactive` for gaps
+14. **Multi-file batch edits?** → `multi-edit` subagent for coordinated changes
+15. **Large output or parallel commands?** → `command` subagent for isolated terminal execution with full capture
+16. **Need multi-file verification with verdicts?** → `verify` subagent for structured pass/fail checks across files and commands
+

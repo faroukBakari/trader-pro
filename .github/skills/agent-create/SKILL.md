@@ -1,31 +1,29 @@
 ---
 name: agent-create
-description: Create VS Code custom agents (.agent.md files) with proper YAML frontmatter, tool configuration, and Claude optimizations. Use when creating agents, configuring subagents, or setting up handoffs.
+description: Create VS Code custom agents (.agent.md files) with proper YAML frontmatter, constraint craft, skill integration, and handoff design. Use when creating agents, configuring subagents, designing handoff chains, or writing effective constraints.
 ---
 
-# Custom Agent Creation
+# Custom Agent Creation Techniques
 
-You are creating a **VS Code Custom Agent** (`.agent.md` file) for GitHub Copilot. These agents extend Copilot with specialized behaviors, tool restrictions, and orchestration patterns.
+Techniques for authoring high-quality VS Code Custom Agent files (`.agent.md`). This skill teaches **craft** — how to make good design choices during agent creation — not workflow (the creating agent owns that).
 
 ---
 
 ## <constraints>
 
 ### CRITICAL
-- **File location**: `.github/agents/{name}.agent.md`
-- **No code fence wrappers** — file starts directly with `---`
-- **Valid tool aliases only**: `read`, `search`, `edit`, `execute`, `agent`, `web/fetch`, `todo`
-- **Model format**: Include `(copilot)` suffix — e.g., `Claude Opus 4.5 (copilot)`
+- **File location**: `.github/agents/{name}.agent.md` (user-facing) or `{name}.sub.agent.md` (subagent)
+- **No code fence wrappers** — written agent files start directly with `---` (raw text). Read-back tools may display fences around file content as rendering artifacts — ignore those.
+- **Valid tool aliases**: `read`, `search`, `edit`, `execute`, `agent`, `web/fetch`, `web`, `todo`
 
 ### IMPORTANT
-- Hidden subagents require `user-invokable: false`
-- Read-only agents should restrict to `tools: ['read', 'search', 'web/fetch']`
-- Implementation agents typically need `execute` for terminal access
+- Use XML-style sections for Claude optimization (see `<agent_prompt_structure>`)
+- Apply constraint hierarchy: CRITICAL > IMPORTANT > GUIDELINES
+- Reference templates from `.github/agents/{type}-template.md` for full structure
 
 ### GUIDELINES
-- Use XML-style sections (`<constraints>`, `<methodology>`) for Claude optimization
-- Apply constraint hierarchy: CRITICAL > IMPORTANT > GUIDELINES
-- Keep prompts focused on one coherent workflow
+- Keep agent files under 200 lines — extract to skills if larger
+- Use generic archetypes in examples, not specific agent names
 
 </constraints>
 
@@ -35,51 +33,101 @@ You are creating a **VS Code Custom Agent** (`.agent.md` file) for GitHub Copilo
 
 ### Required Properties
 
+Every agent file must have:
+
 ```yaml
 ---
-name: agent-name              # Lowercase, hyphenated
-description: What this agent does
+name: agent-name              # Lowercase, kebab-case, matches filename
+description: What this agent does. Use when {trigger scenarios}.
 ---
 ```
 
-### Optional Properties
+### Conditional Properties — Decision Table
 
-| Property | Type | Purpose |
-|----------|------|---------|
-| `model` | string | `Claude Opus 4.5 (copilot)` or `Claude Sonnet 4.5 (copilot)` |
-| `tools` | array | Tool restrictions — see aliases below |
-| `agents` | array | Allowed subagents: `['research', 'test']` |
-| `user-invokable` | bool | `false` hides agent from user (subagent only) |
-| `argument-hint` | string | Placeholder text in agent picker |
-| `handoffs` | array | Sequential workflow transitions |
+Include each property ONLY when the condition applies:
 
-### Tool Aliases
+| Property | Include When | Skip When | Format |
+|----------|-------------|-----------|--------|
+| `model` | Agent needs a specific model tier | Default model is acceptable | `Claude Sonnet 4.5 (copilot)` |
+| `tools` | Agent needs a restricted tool set | Agent should have all tools | `['read', 'search', 'edit']` |
+| `agents` | Agent delegates to subagents | No delegation needed | `['research', 'extract']` |
+| `user-invokable` | Subagent — set to `false` | User-facing (default `true`) | `false` |
+| `handoffs` | Agent participates in workflow chains | Standalone agent | See `<handoff_design>` |
+| `argument-hint` | Agent benefits from input guidance | Purpose is obvious from name | `"describe the feature"` |
+| `disable-model-invocation` | Agent should never auto-activate | Agent can be auto-routed | `true` |
 
-| Alias | Description |
-|-------|-------------|
-| `read` | Read files and notebooks |
-| `search` | Search files and content (grep, glob) |
-| `edit` | Modify files |
-| `execute` | Run terminal commands |
-| `agent` | Invoke subagents |
-| `web/fetch` | Fetch web pages |
-| `todo` | Task list management |
+### Tool Alias Reference
 
-### Handoffs Configuration
+| Alias | Maps To | Use Case |
+|-------|---------|----------|
+| `read` | `read_file`, `list_dir`, notebook tools | File inspection |
+| `search` | `grep_search`, `file_search`, `semantic_search` | Code discovery |
+| `edit` | `replace_string_in_file`, `create_file`, `multi_replace_string_in_file` | Code modification |
+| `execute` | `run_in_terminal`, `get_terminal_output`, `await_terminal`, `kill_terminal`, `create_and_run_task` | Command execution |
+| `agent` | `runSubagent` | Task delegation |
+| `web/fetch` | `fetch_webpage` | Web content retrieval |
+| `web` | `mcp_microsoft_pla_browser_*` | Browser automation |
+| `todo` | `manage_todo_list` | Progress tracking |
 
-```yaml
-handoffs:
-  - label: Button Label
-    agent: target-agent
-    prompt: Instructions passed to target agent
-    send: false  # false = user confirms, true = auto-submit
-```
+**Least-privilege principle**: Start with the minimum tool set. Add tools only when the agent genuinely needs them.
 
 </yaml_reference>
 
 ---
 
-## <prompt_structure>
+## <frontmatter_decision_tree>
+
+Construct the YAML frontmatter systematically:
+
+```
+1. NAME & DESCRIPTION (always required)
+   └── name: kebab-case matching filename
+   └── description: purpose + "Use when" trigger keywords
+
+2. DEPLOYMENT MODE
+   ├── User-facing? → file: {name}.agent.md (user-invokable defaults true)
+   └── Subagent?    → file: {name}.sub.agent.md
+                    → user-invokable: false (mandatory)
+                    → No handoffs (SA-6)
+                    → No agents list (SA-7)
+
+3. MODEL SELECTION
+   ├── Mostly reads/searches?           → Haiku 4.5
+   ├── Writes code or reviews?          → Sonnet 4.5
+   ├── Orchestrates or plans?           → Opus 4.6
+   └── Subagent?                        → Default one tier below parent (SA-2)
+   Format: "Claude {Model} {Version} (copilot)"
+
+4. TOOL SET (least privilege)
+   ├── Read-only agent?                 → ['read', 'search']
+   ├── + needs web?                     → add 'web/fetch' or 'web'
+   ├── + writes code?                   → add 'edit'
+   ├── + runs commands?                 → add 'bash'
+   ├── + delegates?                     → add 'agent'
+   └── + tracks progress?              → add 'todo'
+
+5. DELEGATION (optional)
+   ├── Spawns subagents?                → agents: ['name1', 'name2']
+   └── No delegation?                   → omit agents
+
+6. WORKFLOW TRANSITIONS (user-facing only)
+   ├── Part of a chain?                 → add handoffs (see <handoff_design>)
+   └── Standalone?                      → omit handoffs
+```
+
+</frontmatter_decision_tree>
+
+---
+
+## <agent_prompt_structure>
+
+### Why XML Sections Work
+
+Claude processes `<section_name>` tags as **semantic boundaries**, like HTML structures a document. Benefits:
+
+- **Instruction following**: Content within named sections receives higher-priority attention
+- **Selective retrieval**: Sections create natural "attention anchors" — the model targets `<constraints>` for rules, `<methodology>` for approach
+- **Debuggability**: When an agent misbehaves, you can pinpoint which section failed
 
 ### Recommended Layout
 
@@ -93,13 +141,13 @@ You are a **[Role]** that [purpose].
 ## <constraints>
 
 ### CRITICAL
-- **RULE** — explanation
+- **VERB-FIRST RULE** — explanation
 
 ### IMPORTANT
-- **RULE** — explanation
+- **VERB-FIRST RULE** — explanation
 
 ### GUIDELINES
-- **RULE** — explanation
+- **VERB-FIRST RULE** — explanation
 
 </constraints>
 
@@ -107,7 +155,8 @@ You are a **[Role]** that [purpose].
 
 ## <methodology>
 
-[Step-by-step workflow]
+### Phase 1: {Name}
+[Phased approach, not flat lists]
 
 </methodology>
 
@@ -120,120 +169,197 @@ You are a **[Role]** that [purpose].
 </output_format>
 ```
 
-### Constraint Hierarchy
+### Section Naming Conventions
 
-| Level | Expectation | Typical Use |
-|-------|-------------|-------------|
-| CRITICAL | Must follow | Safety rules, immutable constraints |
-| IMPORTANT | Should follow | Best practices, strong preferences |
-| GUIDELINES | May follow | Suggestions, style preferences |
+| Section | Purpose | Required? |
+|---------|---------|-----------|
+| `<constraints>` | Behavioral rules with hierarchy | Yes |
+| `<methodology>` | Phased approach to tasks | Yes |
+| `<output_format>` | Expected deliverable structure | Recommended |
+| `<project_rules>` | Project-specific conventions | When applicable |
+| `<caller_protocol>` | How parents invoke (subagents only) | Subagents: mandatory (SA-4) |
+| `<anti_patterns>` | Common mistakes to avoid | Recommended |
 
-</prompt_structure>
+</agent_prompt_structure>
 
 ---
 
-## <agent_patterns>
+## <constraint_craft>
 
-### Read-Only Research Agent
+Writing effective constraints is the highest-leverage skill in agent design. Weak constraints are the #1 quality problem.
 
-For information gathering without side effects:
+### The 4 Properties of a Good Constraint
 
-```yaml
----
-name: research
-description: Information gathering - read-only, no modifications
-tools: ['read', 'search', 'web/fetch']
-user-invokable: false
----
+| Property | Test | Bad | Good |
+|----------|------|-----|------|
+| **Verb-first** | Starts with action verb? | "Generated code should be typed" | "**NEVER** use `any` type" |
+| **Testable** | Can you verify compliance? | "Be careful with edits" | "**ALWAYS** run tests after file changes" |
+| **Scoped** | Clear boundary? | "Don't break things" | "**NEVER** edit files in `*_generated/` directories" |
+| **Actionable** | Agent knows what to do? | "Follow best practices" | "**MUST** use `make` targets instead of raw `npm`/`poetry`" |
 
-# Research Specialist
+### Constraint Strength Test
 
-You gather information without modifying files.
+Before finalizing, evaluate each constraint:
 
-## <constraints>
+```
+1. If the agent ignores this, what breaks?
+   → Nothing?              → GUIDELINE at most, or delete
+   → Quality degrades?     → IMPORTANT
+   → Incorrect/harmful?    → CRITICAL
 
-### CRITICAL
-- **Never** suggest code modifications
-- **Only** report findings with file references
+2. Could I write a test for this constraint?
+   → Yes → Good constraint
+   → No  → Too vague, rewrite
+
+3. Does this constraint duplicate another?
+   → Yes → Merge or delete
 ```
 
-### Implementation Agent
+### Constraint Anti-Patterns
 
-For code changes with validation:
+| Anti-Pattern | Example | Fix |
+|---|---|---|
+| **Vague mandate** | "Be thorough" | Delete — adds no information |
+| **Unbounded scope** | "Always check everything" | Scope it: "Always check type errors before committing" |
+| **Contradictory pair** | "Never modify files" + "Fix all errors" | Resolve: "Never modify generated files; fix errors in source only" |
+| **Aspirational fluff** | "Strive for excellence" | Delete — constraints must be binary pass/fail |
+| **Disguised tool instruction** | "Use grep_search to find patterns" | Move to methodology — constraints define WHAT, methodology defines HOW |
+
+</constraint_craft>
+
+---
+
+## <skill_integration>
+
+### Examples & Quick Reference
+
+See companion files for concrete good/bad examples:
+- [Prompt examples](../../agents/prompt-examples.md) — VS Code variables, boundary guidance, thin vs bloated prompts
+- [Skill examples](../../agents/skill-examples.md) — Portability patterns, scope guidance, directory structure
+
+### How Agents Reference Skills
+
+Skills integrate into agents through two mechanisms:
+
+#### 1. Inline Reference (in constraints or methodology)
+
+```markdown
+### IMPORTANT
+- Apply `design-review` skill when validating architectural decisions
+- Apply `terminal-safety` skill before running terminal commands
+```
+
+The agent reads the skill's SKILL.md via `read_file` when the skill becomes relevant. The skill description (in `copilot-instructions.md` or `<skill>` tag) triggers the load.
+
+#### 2. Skill Tag Registration (in copilot-instructions.md)
+
+```markdown
+<skill>
+<name>debug-hypothesis</name>
+<description>Hypothesis-driven debugging. Use when investigating root cause.</description>
+<file>.github/skills/debug-hypothesis/SKILL.md</file>
+</skill>
+```
+
+### Progressive Disclosure Levels
+
+| Level | What Loads | Cost | When |
+|---|---|---|---|
+| **L1: Description** | Name + 1-line description | ~20 tokens | Always (base instructions) |
+| **L2: Full skill** | SKILL.md body | ~200-500 tokens | Description matches task |
+| **L3: Resources** | Supplementary files | Variable | Skill explicitly references them |
+
+### Inline vs Extract Decision
+
+```
+Skill content < 5 lines?          → Inline in agent (not worth a file)
+Skill content 5-30 lines?         → Inline if agent-specific; extract if reusable
+Skill content > 30 lines?         → Always extract to skill file
+Used by 2+ agents?                → Always extract to skill file
+```
+
+### Writing Good Skill Descriptions
+
+The description is the trigger mechanism — optimize for **recall** (catches relevant tasks) without over-broad **precision**:
+
+```markdown
+<!-- ❌ Low recall -->
+<description>For testing</description>
+
+<!-- ❌ Low precision -->
+<description>For development work</description>
+
+<!-- ✅ Balanced -->
+<description>Test planning, coverage analysis, and test pattern selection.
+Use when designing test strategies or analyzing test gaps.</description>
+```
+
+</skill_integration>
+
+---
+
+## <handoff_design>
+
+### Handoff Mechanics
+
+Handoffs create **lateral transitions** between peer agents. The user sees a button and chooses whether to transition.
 
 ```yaml
----
-name: implement
-description: Code implementation with test validation
-tools: ['read', 'search', 'edit', 'execute', 'agent', 'todo']
-agents: ['research', 'test']
 handoffs:
-  - label: Review Changes
-    agent: review
-    prompt: Review all changes made in this session.
-    send: false
----
-
-# Implementation Engineer
-
-You implement code changes with continuous validation.
-
-## <constraints>
-
-### CRITICAL
-- **Always** run tests after changes
-- **Never** edit generated code directories
+  - label: "Review Changes"        # Button text shown to user
+    agent: review                   # Target agent
+    prompt: "Review all changes made in this session."  # Context passed
+    send: false                     # false = user confirms, true = auto-submit
 ```
 
-### Orchestrator Agent
+### `send: true` vs `send: false`
 
-For coordinating multiple agents:
+| Setting | Behavior | Use When |
+|---|---|---|
+| `send: false` | User sees prompt, can edit before sending | **Default** — gives user control |
+| `send: true` | Auto-submits to target agent immediately | Well-defined, low-risk transitions only |
 
-```yaml
----
-name: study
-description: Technical analysis with implementation options
-tools: ['read', 'search', 'agent', 'web/fetch']
-agents: ['research']
-handoffs:
-  - label: Plan Implementation
-    agent: plan
-    prompt: Create implementation plan based on analysis.
-    send: false
-  - label: Start Implementation
-    agent: implement
-    prompt: Implement the recommended solution.
-    send: false
----
-```
+### Common Workflow Chains
 
-</agent_patterns>
+| Chain | Pattern | When |
+|---|---|---|
+| Analysis → Planning → Execution | study → plan → implement | New features, complex changes |
+| Planning → Execution → Validation | plan → implement → review | Planned work with quality gate |
+| Execution → Testing → Review | implement → test → review | Implementation-focused work |
+| Diagnosis → Fix → Verify | rca → implement → test | Bug fixing |
 
----
+### Handoff Anti-Patterns
 
-## <workflow>
+| Anti-Pattern | Problem | Fix |
+|---|---|---|
+| **Circular handoffs** | A → B → A creates infinite loops | Design directional chains |
+| **Too many handoffs** | 5+ buttons overwhelm users | Max 2-3 handoffs per agent |
+| **Vague prompt** | "Continue the work" gives no context | Specific: "Implement the plan from the analysis above" |
+| **Subagent with handoffs** | Subagents don't interact with users (SA-6) | Remove — use parent's handoffs instead |
 
-1. **Define purpose** — What does this agent do?
-2. **Select tools** — Minimum required (principle of least privilege)
-3. **Choose model** — See `model-selection` skill for FinOps-aware guidance
-4. **Set visibility** — `user-invokable: false` for subagents
-5. **Configure handoffs** — If sequential workflow needed
-6. **Write prompt** — Use constraint hierarchy and XML sections
-7. **Validate** — Check tool aliases, model format, file location
-
-</workflow>
+</handoff_design>
 
 ---
 
-## <validation>
+## <anti_patterns>
 
-Before finalizing, verify:
+### Agent File Anti-Patterns
 
-- [ ] File path: `.github/agents/{name}.agent.md`
-- [ ] Starts with `---` (no code fence wrapper)
-- [ ] Tool aliases are valid (not `bash` — use `execute`; not `fetch` — use `web/fetch`)
-- [ ] Model includes `(copilot)` suffix
-- [ ] Hidden subagents have `user-invokable: false`
-- [ ] Prompt uses constraint hierarchy (CRITICAL/IMPORTANT/GUIDELINES)
+| Anti-Pattern | Signal | Fix |
+|---|---|---|
+| **Monolith agent** | 300+ lines, does everything | Split: extract skills, add subagent delegation |
+| **Tool hoarder** | Every tool alias included "just in case" | Audit: remove tools the agent never uses |
+| **Flat methodology** | "1. Do this. 2. Do that." | Restructure into named phases with clear purpose |
+| **Constraint soup** | 20 constraints, no hierarchy | Classify CRITICAL/IMPORTANT/GUIDELINES; delete fluff |
+| **Template copy** | Agent is mostly template with placeholders filled | Customize: add domain knowledge, real constraints |
+| **Skill-ignorant** | Reinvents methods that exist as skills | Search existing skills; reference them |
 
-</validation>
+### Naming Anti-Patterns
+
+| Anti-Pattern | Example | Fix |
+|---|---|---|
+| **Verb-noun mismatch** | `code-writer.agent.md` | Use role noun: `implement.agent.md` |
+| **Too generic** | `helper.agent.md` | Name the specialization: `review.agent.md` |
+| **Missing `.sub` marker** | Subagent named `research.agent.md` | Rename: `research.sub.agent.md` |
+
+</anti_patterns>
