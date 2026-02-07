@@ -66,7 +66,7 @@ Include each property ONLY when the condition applies:
 | `execute` | `run_in_terminal`, `get_terminal_output`, `await_terminal`, `kill_terminal`, `create_and_run_task` | Command execution |
 | `agent` | `runSubagent` | Task delegation |
 | `web/fetch` | `fetch_webpage` | Web content retrieval |
-| `web` | `mcp_microsoft_pla_browser_*` | Browser automation |
+| `playwright/*` | `browser_click`, `browser_snapshot`, `browser_navigate`, etc. | Browser automation (Playwright MCP) |
 | `todo` | `manage_todo_list` | Progress tracking |
 
 **Least-privilege principle**: Start with the minimum tool set. Add tools only when the agent genuinely needs them.
@@ -100,7 +100,8 @@ Construct the YAML frontmatter systematically:
 
 4. TOOL SET (least privilege)
    ├── Read-only agent?                 → ['read', 'search']
-   ├── + needs web?                     → add 'web/fetch' or 'web'
+   ├── + needs web fetch?               → add 'web/fetch'
+   ├── + needs browser automation?      → add 'playwright/*'
    ├── + writes code?                   → add 'edit'
    ├── + runs commands?                 → add 'bash'
    ├── + delegates?                     → add 'agent'

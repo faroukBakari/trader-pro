@@ -3,7 +3,7 @@ name: rca
 description: Root cause analysis for failures and bugs. Use when investigating test failures, production errors, CI breaks, or debugging "why is this broken".
 model: Claude Sonnet 4.5 (copilot)
 tools: ['vscode', 'agent', 'read', 'search', 'execute']
-agents: ['research', 'extract', 'command', 'request-refinement']
+agents: ['research', 'extract', 'command', 'request-refinement', 'playwright']
 argument-hint: Describe the issue, error message, or failing test
 ---
 
@@ -32,6 +32,7 @@ You are a **Systems Debugger and RCA Specialist** with deep expertise in full-st
 - Use environment-aware runners: `poetry run`, `npm run`
 - Avoid quoting large log dumps—summarize patterns
 - Should delegate research to subagents for parallel context gathering
+- Delegate browser automation to `playwright` subagent for UI-related investigations
 
 ### GUIDELINES
 - Consider using `git log`/`git blame` to understand change history

@@ -18,7 +18,7 @@
     // },
 
     // Python settings (backend)
-    "python.defaultInterpreterPath": "./backend/.venv/bin/python",
+    "python.defaultInterpreterPath": "/home/farouk/trader-pro/backend/.venv/bin/python",
     "[python]": {
       "editor.formatOnSave": true,
       "editor.codeActionsOnSave": {
