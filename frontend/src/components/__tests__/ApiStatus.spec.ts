@@ -1,230 +1,270 @@
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { describe, expect, it, vi } from 'vitest'
 import ApiStatus from '../ApiStatus.vue'
 
-describe('ApiStatus', () => {
-  it('renders the component with semantic header', () => {
+// Mock ApiService
+vi.mock('@/services/apiService', () => {
+  // Mock data must be defined inside the factory
+  const mockModules = [
+    {
+      name: 'broker',
+      displayName: 'Broker',
+      docsUrl: '/api/v1/broker/docs',
+      hasWebSocket: true,
+    },
+    {
+      name: 'datafeed',
+      displayName: 'Datafeed',
+      docsUrl: '/api/v1/datafeed/docs',
+      hasWebSocket: true,
+    },
+  ]
+
+  const mockHealth = new Map([
+    [
+      'broker',
+      {
+        moduleName: 'broker',
+        health: { status: 'ok', message: 'Service operational' },
+        loading: false,
+        error: null,
+        responseTime: 45,
+      },
+    ],
+    [
+      'datafeed',
+      {
+        moduleName: 'datafeed',
+        health: { status: 'ok', message: 'Service operational' },
+        loading: false,
+        error: null,
+        responseTime: 32,
+      },
+    ],
+  ])
+
+  const MockApiService = vi.fn().mockImplementation(() => ({
+    getAllModulesHealth: vi.fn().mockResolvedValue(mockHealth),
+    getClientType: vi.fn().mockReturnValue('mock'),
+  }))
+
+  // Add static method to the mock constructor (bypassing type checking for test mock)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(MockApiService as any).getIntegratedModules = vi.fn().mockReturnValue(mockModules)
+
+  return {
+    ApiService: MockApiService,
+  }
+})
+
+describe('ApiStatus - Collapsed Pill', () => {
+  it('renders pill in collapsed state by default', () => {
     const wrapper = mount(ApiStatus)
-    const header = wrapper.find('header')
-    expect(header.exists()).toBe(true)
-    expect(wrapper.text()).toContain('API Status')
+    expect(wrapper.find('.status-pill').exists()).toBe(true)
+    expect(wrapper.find('.status-panel').exists()).toBe(false)
   })
 
-  it('displays client type in header', () => {
+  it('pill contains status dot and API label', () => {
     const wrapper = mount(ApiStatus)
-    const header = wrapper.find('header')
-    expect(header.text()).toContain('Client:')
+    const pill = wrapper.find('.status-pill')
+    expect(pill.find('.status-dot').exists()).toBe(true)
+    expect(pill.find('.pill-label').text()).toBe('API')
   })
 
-  it('shows loading state initially', async () => {
+  it('pill has aria-label for accessibility', () => {
     const wrapper = mount(ApiStatus)
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.text()).toContain('Loading API status...')
-    const loadingParagraph = wrapper.find('p.loading')
-    expect(loadingParagraph.exists()).toBe(true)
-  })
-
-  it('has a refresh button', () => {
-    const wrapper = mount(ApiStatus)
-    const refreshButton = wrapper.find('button')
-    expect(refreshButton.exists()).toBe(true)
-    expect(refreshButton.text()).toContain('Refresh')
-  })
-
-  it('displays API status information after loading', async () => {
-    const wrapper = mount(ApiStatus)
-
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.text()).not.toContain('Loading API status...')
-    const text = wrapper.text()
-    expect(text).toBeTruthy()
-    expect(text.length).toBeGreaterThan(50)
-  })
-
-  it('refresh button triggers data refresh without re-rendering cards', async () => {
-    const wrapper = mount(ApiStatus)
-
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    await wrapper.vm.$nextTick()
-
-    const cardsBefore = wrapper.findAll('article.module-card')
-    const refreshButton = wrapper.find('button')
-    expect(refreshButton.exists()).toBe(true)
-
-    await refreshButton.trigger('click')
-    await wrapper.vm.$nextTick()
-
-    const cardsAfter = wrapper.findAll('article.module-card')
-    expect(cardsAfter.length).toBe(cardsBefore.length)
-    expect(wrapper.text()).toContain('API Status')
-  })
-
-  it('separates initial loading from refresh state', async () => {
-    const wrapper = mount(ApiStatus)
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.text()).toContain('Loading API status...')
-
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.text()).not.toContain('Loading API status...')
-
-    const button = wrapper.find('button')
-    await button.trigger('click')
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.text()).not.toContain('Loading API status...')
-    expect(button.text()).toContain('Refresh')
+    const pill = wrapper.find('.status-pill')
+    expect(pill.attributes('aria-label')).toBe('API Status')
   })
 })
 
-describe('ApiStatus - Multi-Module Display', () => {
-  it('should render module cards from static configuration', async () => {
+describe('ApiStatus - Panel Expand/Collapse', () => {
+  it('expands panel on pill click', async () => {
     const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await wrapper.find('.status-pill').trigger('click')
     await wrapper.vm.$nextTick()
-
-    const moduleCards = wrapper.findAll('article.module-card')
-    expect(moduleCards.length).toBeGreaterThanOrEqual(2)
+    expect(wrapper.find('.status-panel').exists()).toBe(true)
+    expect(wrapper.find('.status-pill').exists()).toBe(false)
   })
 
-  it('should display module names in h3 headings', async () => {
+  it('collapses panel on close button click', async () => {
     const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await wrapper.find('.status-pill').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.status-panel').exists()).toBe(true)
+
+    await wrapper.find('.close-btn').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.status-panel').exists()).toBe(false)
+    expect(wrapper.find('.status-pill').exists()).toBe(true)
+  })
+
+  it('collapses panel on Escape key', async () => {
+    const wrapper = mount(ApiStatus)
+    await wrapper.find('.status-pill').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.status-panel').exists()).toBe(true)
+
+    await wrapper.find('.status-panel').trigger('keydown.esc')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.status-panel').exists()).toBe(false)
+    expect(wrapper.find('.status-pill').exists()).toBe(true)
+  })
+
+  it('starts auto-collapse timer on mouseleave', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(ApiStatus)
+
+    // Expand panel
+    await wrapper.find('.status-pill').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.status-panel').exists()).toBe(true)
+
+    // Trigger mouseleave
+    await wrapper.find('.api-status-overlay').trigger('mouseleave')
+
+    // Panel should still be open
+    expect(wrapper.find('.status-panel').exists()).toBe(true)
+
+    // Fast-forward 3 seconds
+    vi.advanceTimersByTime(3000)
+    await wrapper.vm.$nextTick()
+
+    // Panel should now be collapsed
+    expect(wrapper.find('.status-panel').exists()).toBe(false)
+    expect(wrapper.find('.status-pill').exists()).toBe(true)
+
+    vi.useRealTimers()
+  })
+
+  it('cancels auto-collapse timer on mouseenter', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(ApiStatus)
+
+    // Expand panel
+    await wrapper.find('.status-pill').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    // Start collapse timer
+    await wrapper.find('.api-status-overlay').trigger('mouseleave')
+
+    // Fast-forward 1.5 seconds (half the timer)
+    vi.advanceTimersByTime(1500)
+
+    // Re-enter before timer expires
+    await wrapper.find('.api-status-overlay').trigger('mouseenter')
+
+    // Fast-forward past original timer
+    vi.advanceTimersByTime(2000)
+    await wrapper.vm.$nextTick()
+
+    // Panel should still be open (timer was cancelled)
+    expect(wrapper.find('.status-panel').exists()).toBe(true)
+
+    vi.useRealTimers()
+  })
+})
+
+describe('ApiStatus - Panel Content', () => {
+  it('shows header with API Status title', async () => {
+    const wrapper = mount(ApiStatus)
+    await wrapper.find('.status-pill').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const header = wrapper.find('.panel-header')
+    expect(header.exists()).toBe(true)
+    expect(header.text()).toContain('API Status')
+  })
+
+  it('shows client type badge', async () => {
+    const wrapper = mount(ApiStatus)
+    await wrapper.find('.status-pill').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const badge = wrapper.find('.client-badge')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('mock')
+  })
+
+  it('shows module rows after data loads', async () => {
+    const wrapper = mount(ApiStatus)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('.status-pill').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const rows = wrapper.findAll('.module-row')
+    expect(rows.length).toBe(2)
+  })
+
+  it('displays module names in rows', async () => {
+    const wrapper = mount(ApiStatus)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('.status-pill').trigger('click')
     await wrapper.vm.$nextTick()
 
     const text = wrapper.text()
     expect(text).toContain('Broker')
     expect(text).toContain('Datafeed')
-
-    const headings = wrapper.findAll('article h3')
-    expect(headings.length).toBeGreaterThanOrEqual(2)
   })
 
-  it('should use definition lists for module details', async () => {
+  it('shows health status dots in module rows', async () => {
     const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await flushPromises()
     await wrapper.vm.$nextTick()
 
-    const definitionLists = wrapper.findAll('dl')
-    expect(definitionLists.length).toBeGreaterThanOrEqual(2)
-
-    const dtElements = wrapper.findAll('dt')
-    expect(dtElements.length).toBeGreaterThan(0)
-    expect(dtElements.some((dt) => dt.text() === 'Health:')).toBe(true)
-  })
-
-  it('should display health status with correct CSS classes', async () => {
-    const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await wrapper.find('.status-pill').trigger('click')
     await wrapper.vm.$nextTick()
 
-    const statusElements = wrapper.findAll('.status')
-    expect(statusElements.length).toBeGreaterThan(0)
-
-    const hasStatusClass = statusElements.some((el) => {
-      return (
-        el.classes().includes('status-ok') ||
-        el.classes().includes('status-error') ||
-        el.classes().includes('status-unknown')
-      )
+    const rows = wrapper.findAll('.module-row')
+    rows.forEach((row) => {
+      expect(row.find('.status-dot').exists()).toBe(true)
     })
-    expect(hasStatusClass).toBe(true)
   })
 
-  it('should handle error states gracefully', async () => {
+  it('has a refresh button in the panel', async () => {
     const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await flushPromises()
     await wrapper.vm.$nextTick()
 
-    const text = wrapper.text()
-    const hasHealthSection = text.includes('Health:')
-    expect(hasHealthSection).toBe(true)
+    await wrapper.find('.status-pill').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const refreshBtn = wrapper.find('.refresh-btn')
+    expect(refreshBtn.exists()).toBe(true)
+    expect(refreshBtn.text()).toContain('Refresh')
   })
 
-  it('should display module data without duplicating cards', async () => {
+  it('refresh button triggers data reload', async () => {
     const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await flushPromises()
     await wrapper.vm.$nextTick()
 
-    const cardsBefore = wrapper.findAll('article.module-card')
-    const button = wrapper.find('button')
-    await button.trigger('click')
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    await wrapper.find('.status-pill').trigger('click')
     await wrapper.vm.$nextTick()
 
-    const cardsAfter = wrapper.findAll('article.module-card')
-    expect(cardsAfter.length).toBe(cardsBefore.length)
+    const refreshBtn = wrapper.find('.refresh-btn')
+    await refreshBtn.trigger('click')
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    // Should still show rows after refresh
+    const rows = wrapper.findAll('.module-row')
+    expect(rows.length).toBe(2)
   })
 
-  it('should display version info in definition list', async () => {
+  it('displays module doc links', async () => {
     const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await flushPromises()
     await wrapper.vm.$nextTick()
 
-    const dls = wrapper.findAll('dl')
-    expect(dls.length).toBeGreaterThan(0)
-
-    const dtElements = wrapper.findAll('dt')
-    expect(dtElements.length).toBeGreaterThan(0)
-  })
-
-  it('should display OpenAPI docs links in nav element', async () => {
-    const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await wrapper.find('.status-pill').trigger('click')
     await wrapper.vm.$nextTick()
 
-    const navElements = wrapper.findAll('nav')
-    expect(navElements.length).toBeGreaterThan(0)
-
-    const links = wrapper.findAll('nav a')
-    expect(links.length).toBeGreaterThan(0)
-
-    const hasDocsLink = links.some((link) => link.text().includes('OpenAPI Docs'))
-    expect(hasDocsLink).toBe(true)
-  })
-
-  it('should display AsyncAPI links for modules with WebSocket', async () => {
-    const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await wrapper.vm.$nextTick()
-
-    const text = wrapper.text()
-    expect(text).toContain('AsyncAPI')
-
-    const links = wrapper.findAll('nav a')
-    const hasAsyncApiLink = links.some((link) => link.text().includes('AsyncAPI'))
-    expect(hasAsyncApiLink).toBe(true)
-  })
-
-  it('should disable refresh button while refreshing', async () => {
-    const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await wrapper.vm.$nextTick()
-
-    const button = wrapper.find('button')
-    expect(button.attributes('disabled')).toBeUndefined()
-
-    await button.trigger('click')
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.text()).toContain('Refresh')
-  })
-
-  it('should enable refresh button after refresh completes', async () => {
-    const wrapper = mount(ApiStatus)
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await wrapper.vm.$nextTick()
-
-    const button = wrapper.find('button')
-    await button.trigger('click')
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    await wrapper.vm.$nextTick()
-
-    expect(button.attributes('disabled')).toBeUndefined()
+    const links = wrapper.findAll('.module-link')
+    expect(links.length).toBe(2)
   })
 })
