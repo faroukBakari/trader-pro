@@ -134,9 +134,15 @@ We maintain a **forked, patched, reverse-engineered** TradingView Trading Termin
 
 ## External Resources
 
-- **TradingView Docs**: https://www.tradingview.com/charting-library-docs/latest/trading_terminal/
+- **TradingView Docs Portal**: https://www.tradingview.com/charting-library-docs/latest/trading_terminal/
+- **Full API Reference**: https://www.tradingview.com/charting-library-docs/latest/api/
 - **Broker API**: https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IBrokerTerminal/
 - **Trading Host**: https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IBrokerConnectionAdapterHost/
+- **Datafeed API**: https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/
+- **Tutorials**: https://www.tradingview.com/charting-library-docs/latest/tutorials/
+- **Getting Started**: https://www.tradingview.com/charting-library-docs/latest/getting_started/
+- **GitHub Examples**: https://github.com/tradingview/charting-library-examples
+- **GitHub Tutorial Code**: https://github.com/tradingview/charting-library-tutorial
 
 ---
 
