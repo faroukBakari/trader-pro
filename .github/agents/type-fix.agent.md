@@ -3,8 +3,13 @@ name: type-fix
 description: Fix type errors from mypy, pyright, vue-tsc systematically. Use when type checker fails, seeing type errors, or "fix types" requested.
 model: Claude Sonnet 4.5 (copilot)
 tools: ['vscode', 'agent', 'read', 'search', 'edit', 'execute']
-agents: ['research', 'multi-edit', 'command', 'verify']
+agents: ['research', 'command', 'verify']
 argument-hint: Provide the type error output or file to fix
+handoffs:
+  - label: "Review Type Fixes"
+    agent: review
+    prompt: "Review the type error fixes made in this session for correctness, scope adherence, and that no runtime behavior was altered."
+    send: false
 # Skills: fix-type-errors, drift-guard, reasoning-calibration, sonnet-prompting
 ---
 
