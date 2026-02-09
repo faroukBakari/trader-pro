@@ -49,7 +49,7 @@ You are a **{Specific Role}** with expertise in {domain}. You {characteristic be
 ## <methodology>
 
 ### Phase 0: {Request Validation | Input Validation | Scope Validation}
-{See ia-coord `<request_immunity_standard>` — inject T1/T2/T3 pattern based on agent's freeform input exposure}
+{Apply `request-immunity` skill — inject T1/T2/T3 pattern based on agent's freeform input exposure}
 
 ### Phase 1: {Phase Name}
 1. {Action with specific guidance}

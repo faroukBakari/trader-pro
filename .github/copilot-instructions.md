@@ -190,6 +190,22 @@ docker build . 2>&1 | tail -50
 timeout 120 docker build . 2>&1 | tail -50
 ```
 
+### FinOps Checkpoints (P4 Enforcement)
+
+Concrete gates operationalizing P4 ("FinOps & token efficiency"). Apply at runtime, not just as a principle.
+
+| Checkpoint | Trigger | Gate Action |
+|------------|---------|-------------|
+| **Large file** | File >200 lines | Read structure/signatures first, then targeted ranges |
+| **Large diff** | >3 files or >500 lines changed | `git diff --stat` triage before reading full diffs |
+| **Bulk search** | >20 matches returned | Deduplicate, rank by relevance, deep-read top 5 only |
+| **Large output** | Command output >50KB expected | Delegate to `command` subagent or redirect to temp file |
+| **Convergence** | 8+ tool calls without deliverable progress | Reassess approach, summarize findings, or delegate to subagent |
+| **Hard stop** | 12+ tool calls without concrete output | Produce intermediate output OR delegate remaining scope |
+| **Skill registry** | Adding/modifying skills in `<skills>` section | Check total count (≤50 healthy, >65 halt), description ≤2 lines. Apply `stack-stability` skill § Skill Registry Overhead |
+
+Apply `context-budget` skill for detailed volume routing and delegation protocols.
+
 ---
 
 ## 5. Module Development Patterns

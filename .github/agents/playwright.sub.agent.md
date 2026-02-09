@@ -2,7 +2,7 @@
 name: playwright
 description: Browser automation subagent — executes Playwright MCP commands, processes verbose browser output, and returns lean focused results. Delegated by parent agents for UI inspection, interaction, debugging, and verification tasks.
 model: Claude Sonnet 4.5 (copilot)
-tools: ['vscode', 'playwright/*']
+tools: ['vscode', 'playwright/*', 'filesystem/*']
 user-invokable: false
 # SA-2 rationale: Sonnet required (not Haiku) — accessibility tree interpretation,
 # multi-step interaction decisions, and finding synthesis exceed Haiku's 1-2 hop ceiling.

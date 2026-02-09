@@ -151,93 +151,13 @@ If any show ❌, continue working — do not declare completion.
 
 ---
 
-## <suppression_protocol>
+## <reference>
 
-**Suppressions are NOT solutions.** Only after exhausting all proper fixes:
+For suppression protocol, common fix patterns, and command reference → apply `fix-type-errors` skill (authoritative source for all type resolution procedures).
 
-1. **Root Cause Analysis** — Document:
-   - What library/framework causes the issue
-   - Why proper typing is impossible
-   - What fix approaches were attempted
+</reference>
 
-2. **Propose Suppression** — Specify:
-   - Exact file and line
-   - Specific error code (e.g., `# pyright: ignore[reportAssignmentType]`)
-   - Brief inline comment explaining external cause
-
-3. **Validate Before Suggesting:**
-   - Apply suppression temporarily
-   - Run type checker to confirm it resolves error
-   - Remove if validation fails
-
-4. **Report to User:**
-```markdown
-⚠️ SUPPRESSION REQUIRED (External Issue)
-
-File: path/to/file.py:42
-Error: [reportAssignmentType] Type "X" is not assignable to "Y"
-
-Root Cause: [Explanation]
-
-Proposed Fix:
-__tablename__ = "users"  # pyright: ignore[reportAssignmentType]
-
-Validation: ✅ Tested — suppression resolves error
-```
-
-**DO NOT** apply suppressions without user acknowledgment.
-
-</suppression_protocol>
-
----
-
-## <common_patterns>
-
-### Python: TYPE_CHECKING Import
-```python
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from expensive_module import ExpensiveType  # Only imported during type checking
-
-def func(param: "ExpensiveType") -> None:  # Use string annotation
-    ...
-```
-
-### Python: Cast for Library Gaps
-```python
-from typing import cast
-result = cast(ExpectedType, untyped_library_call())  # Document why cast is safe
-```
-
-### TypeScript: Type-Only Import
-```typescript
-import type { SomeType } from './module'  // Erased at runtime
-import { SomeValue } from './module'       // Kept at runtime
-```
-
-### TypeScript: Type Assertion (sparingly)
-```typescript
-const value = untypedResult as ExpectedType  // Only when certain
-```
-
-</common_patterns>
-
----
-
-## <command_reference>
-
-### Backend (Python)
-```bash
-make -C backend type-check      # Full check (mypy + pyright)
-make -C backend format          # black + isort + autoflake
-cd backend && poetry run pyright src/ tests/  # Pyright only
-cd backend && poetry run mypy src/             # Mypy only
-```
-
-### Frontend (TypeScript/Vue)
-```bash
-make -C frontend type-check     # vue-tsc --build
-make -C frontend lint           # ESLint with auto-fix
-```
+<!-- REMOVED: <suppression_protocol>, <common_patterns>, <command_reference> -->
+<!-- These sections were duplicates of the fix-type-errors skill content. -->
+<!-- The skill is the single source of truth for these procedures. -->
 
