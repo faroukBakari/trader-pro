@@ -226,8 +226,31 @@ Each cycle:
 
 ---
 
+## File Management
+
+Screenshots and other captured artifacts (traces, PDFs) MUST be saved to a **temporary directory**, never to the workspace root or any project directory.
+
+**Temp directory**: `/tmp/playwright-captures/`
+
+**Rules:**
+1. **Create before saving**: `mkdir -p /tmp/playwright-captures/` before the first screenshot
+2. **Save all artifacts there**: Pass `/tmp/playwright-captures/{descriptive-name}.png` as the filename
+3. **Return temp paths to callers**: The full `/tmp/` path is sufficient for callers to reference or display the file — no need to copy into the workspace
+4. **No workspace pollution**: Never save screenshots, traces, or PDFs into the project tree — they are ephemeral verification artifacts, not source-controlled assets
+5. **Auto-cleanup**: Files in `/tmp/` are cleaned on system restart; no manual cleanup needed
+
+**Screenshot naming convention**: Use descriptive kebab-case names that identify the captured state:
+```
+/tmp/playwright-captures/order-form-filled.png
+/tmp/playwright-captures/dashboard-loaded.png
+/tmp/playwright-captures/chart-panel-expanded.png
+```
+
+---
+
 ## Anti-Patterns
 
+- ❌ **Saving screenshots to workspace** — Screenshots are ephemeral artifacts, not project files. Always use `/tmp/playwright-captures/`
 - ❌ **Acting without snapshot** — Never click/type without a fresh `browser_snapshot`; you won't have valid `ref` values
 - ❌ **Screenshot for element discovery** — Screenshots don't provide `ref` values; use `browser_snapshot` instead
 - ❌ **Stale refs after DOM change** — After any interaction that changes the page, re-run `browser_snapshot` to get fresh refs
