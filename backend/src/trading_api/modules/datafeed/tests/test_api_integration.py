@@ -318,6 +318,7 @@ class TestGetBarsCaching:
         # Assert: Provider called BOTH times (no caching)
         assert len(mock_provider.calls["get_historical_bars"]) == 2
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_cache_miss_fetches_and_stores(
         self, cached_service: DatafeedService, mock_provider: MockDatafeedProvider
@@ -362,6 +363,7 @@ class TestGetBarsCaching:
         assert results[0].time == 1000
         assert results[1].time == 2000
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_cache_hit_skips_provider(
         self, cached_service: DatafeedService, mock_provider: MockDatafeedProvider
@@ -406,6 +408,7 @@ class TestGetBarsCaching:
         assert len(results) == 1
         assert results[0].time == 5000
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_partial_cache_fills_gaps_only(
         self, cached_service: DatafeedService, mock_provider: MockDatafeedProvider
@@ -469,6 +472,7 @@ class TestGetBarsCaching:
         assert 5000 in times
         assert 15000 in times
 
+    @pytest.mark.integration
     @pytest.mark.asyncio
     async def test_count_back_applied_after_cache_retrieval(
         self, cached_service: DatafeedService, mock_provider: MockDatafeedProvider
