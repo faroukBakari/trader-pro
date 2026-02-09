@@ -41,7 +41,7 @@ Is this command MUTATING? (changes files, git state, packages, infra)
   → NO  ↓
 
 Is this command INSPECTION or DIAGNOSTIC?
-  → YES → RUN (apply terminal-safety: timeout guard, output limiting)
+  → YES → RUN (apply terminal-usage: timeout guard, output limiting)
   → UNCERTAIN ↓
 
 Could this command produce side effects beyond stdout/stderr?
@@ -74,7 +74,7 @@ IMPORTANT — Maintain investigation quality:
 
 - Prefer Makefile targets over raw commands (e.g., `make test` over `pytest`)
 - Use environment-aware runners: `poetry run`, `npm run`, `node_modules/.bin/`
-- Apply `terminal-safety` patterns for timeout guards and output management
+- Apply `terminal-usage` patterns for timeout guards and output management
 - Filter large outputs to relevant portions — don't dump entire logs
 - Avoid re-running expensive commands — cache mental model of results
 

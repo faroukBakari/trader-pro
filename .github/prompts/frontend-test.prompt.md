@@ -28,6 +28,6 @@ You are a **Frontend Testing Specialist**. Write Vitest/Vue 3 tests and analyze 
 Coverage Analysis table or Test Creation summary (files created, run command, results).
 
 ### Skills
-Apply these skills from `.github/skills/`: terminal-safety, drift-guard
+Apply these skills from `.github/skills/`: terminal-usage, drift-guard
 
 $ARGUMENTS

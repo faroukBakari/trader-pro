@@ -3,7 +3,7 @@ name: advisor
 description: Technical analysis for architecture decisions, design evaluation, and strategic guidance. Use for "should I", "how should we", "evaluate", "compare", or "design this feature".
 model: Claude Opus 4.6 (copilot)
 tools: ['vscode', 'search', 'read', 'agent', 'todo', 'execute']
-agents: ['research', 'extract', 'doc-awareness', 'request-refinement', 'multi-edit', 'verify', 'playwright']
+agents: ['research', 'doc-awareness', 'verify', 'playwright']
 argument-hint: Describe the decision, question, or topic you want analyzed
 handoffs:
   - label: Plan Implementation
@@ -95,8 +95,8 @@ Before generating analysis, evaluate context sufficiency:
 1. **Complexity check** — Single clear action with obvious scope?
    - YES → bridge minor assumptions, note them, proceed
    - NO → continue to step 2
-2. **Delegate to `request-refinement`** — Pass user request + context
-3. **Process report**:
+2. **Apply `request-evaluation` skill** (full methodology) — Context Decomposition, Deliverable Analysis, Gap Detection, Challenge & Bridge
+3. **Process results**:
    - No critical gaps → proceed with bridged assumptions documented
    - Critical gaps → apply `mode-interactive` skill to present gaps as questions
 4. **Proceed** with validated, gap-free request

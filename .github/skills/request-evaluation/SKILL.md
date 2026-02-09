@@ -85,7 +85,29 @@ Systematically scan for gaps across these categories:
    - **Why** it matters (what goes wrong if guessed incorrectly)
    - **Impact** severity: `critical` (substantial deviation) / `moderate` (suboptimal result) / `low` (cosmetic)
 
-### Phase 4: Gap Classification & Report
+### Phase 4: Challenge & Bridge
+
+For every detected gap, apply this challenge loop before classifying:
+
+```
+FOR EACH gap:
+  1. Search workspace for conventions/patterns that resolve it
+     (README, docs, existing code patterns, project config)
+  2. Check if project docs specify an answer
+  3. Count valid interpretations:
+     - 1 interpretation    → auto-bridge, no flag
+     - 2-3, one dominant   → bridge with best, note alternatives
+     - 2-3, all equivalent → bridge with default, note alternatives
+     - 2+, divergent outcomes → CRITICAL — retain for clarification
+  4. For critical gaps, draft a clarification question:
+     - Offer 2-4 concrete options when possible
+     - Include a recommended option with justification
+     - Frame for single-interaction resolution (avoid follow-ups)
+```
+
+**Bridge aggressively** — If a gap has one clearly superior interpretation, bridge it. Only escalate gaps where the wrong guess causes substantial rework or deviation.
+
+### Phase 5: Gap Classification & Report
 
 Classify each gap and produce a structured output:
 

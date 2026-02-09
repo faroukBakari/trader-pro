@@ -1,6 +1,5 @@
 <template>
   <div class="trader-chart-container">
-    <h3>Trading Chart</h3>
     <div class="chart-wrapper">
       <div class="TVChartContainer" ref="chartContainer" />
     </div>
@@ -329,37 +328,32 @@ onUnmounted(async () => {
 
 <style scoped>
 .trader-chart-container {
-  margin: 0 auto;
-  padding: 10px;
-  border: 1px solid rgba(84, 84, 84, 0.48);
-  border-radius: 8px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
   background: #181818;
-}
-
-.trader-chart-container h3 {
-  margin-top: 0;
-  color: rgba(235, 235, 235, 0.64);
-  text-align: center;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .chart-wrapper {
+  flex: 1;
   background: transparent;
-  border-radius: 4px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .TVChartContainer {
   width: 100%;
-  height: 850px;
+  height: 100vh;
 }
 
 @media (max-width: 768px) {
   .trader-chart-container {
-    padding: 10px;
-  }
-
-  .TVChartContainer {
-    height: 400px;
+    padding: 0;
   }
 }
 </style>

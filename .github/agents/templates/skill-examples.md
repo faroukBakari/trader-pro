@@ -44,7 +44,7 @@ A skill should teach **one cohesive method**. If covering multiple unrelated met
 
 **Good scope** (focused):
 - `debug-hypothesis` — Hypothesis-driven debugging workflow
-- `terminal-safety` — Safe command execution with guards
+- `terminal-usage` — Command safety checks and delegation routing
 - `design-review` — Solution selection and stress-testing
 
 **Bad scope** (too broad):

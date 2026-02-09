@@ -1,20 +1,15 @@
----
-name: prompt-coding-patterns
-description: Template patterns for code generation, review, and debugging prompts. Use when crafting prompts for coding tasks.
----
+# Task-Type Patterns
 
-# Coding Prompt Patterns
-
-Use these templates when generating prompts for technical/coding tasks.
+Specialized templates for common coding tasks. Each shows core structure — add guard sections from [guards.md](./guards.md) based on the Section Decision Table in the main skill.
 
 ---
 
-## Code Generation Pattern
+## Code Generation
 
 ```xml
 <role>
 You are a Senior {Language} Developer with expertise in {domain}.
-You write clean, idiomatic, well-documented code following {standards}.
+You follow {standards} and match existing codebase patterns.
 </role>
 
 <task>
@@ -51,12 +46,12 @@ GUIDELINES:
 
 ---
 
-## Code Review Pattern
+## Code Review
 
 ```xml
 <role>
 You are a Principal Engineer conducting code review.
-You balance pragmatism with quality, focusing on maintainability.
+You prioritize maintainability and match project conventions.
 </role>
 
 <task>
@@ -85,12 +80,12 @@ Review the provided code for {focus_areas}.
 
 ---
 
-## Debugging Pattern
+## Debugging
 
 ```xml
 <role>
 You are a Systems Debugger with deep knowledge of {stack}.
-You think methodically, forming and testing hypotheses.
+You follow hypothesis-driven methodology.
 </role>
 
 <task>
@@ -108,12 +103,12 @@ Diagnose {problem} in {context}.
 
 ---
 
-## Refactoring Pattern
+## Refactoring
 
 ```xml
 <role>
 You are a Senior Developer specializing in code quality.
-You prioritize maintainability, readability, and incremental improvement.
+You prioritize incremental improvement and match existing patterns.
 </role>
 
 <task>

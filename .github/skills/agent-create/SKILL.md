@@ -50,7 +50,7 @@ Include each property ONLY when the condition applies:
 |----------|-------------|-----------|--------|
 | `model` | Agent needs a specific model tier | Default model is acceptable | `Claude Sonnet 4.5 (copilot)` |
 | `tools` | Agent needs a restricted tool set | Agent should have all tools | `['read', 'search', 'edit']` |
-| `agents` | Agent delegates to subagents | No delegation needed | `['research', 'extract']` |
+| `agents` | Agent delegates to subagents | No delegation needed | `['research', 'verify']` |
 | `user-invokable` | Subagent — set to `false` | User-facing (default `true`) | `false` |
 | `handoffs` | Agent participates in workflow chains | Standalone agent | See `<handoff_design>` |
 | `argument-hint` | Agent benefits from input guidance | Purpose is obvious from name | `"describe the feature"` |
@@ -235,8 +235,8 @@ Before finalizing, evaluate each constraint:
 ### Examples & Quick Reference
 
 See companion files for concrete good/bad examples:
-- [Prompt examples](../../agents/prompt-examples.md) — VS Code variables, boundary guidance, thin vs bloated prompts
-- [Skill examples](../../agents/skill-examples.md) — Portability patterns, scope guidance, directory structure
+- [Prompt examples](../../agents/templates/prompt-examples.md) — VS Code variables, boundary guidance, thin vs bloated prompts
+- [Skill examples](../../agents/templates/skill-examples.md) — Portability patterns, scope guidance, directory structure
 
 ### How Agents Reference Skills
 
@@ -247,7 +247,7 @@ Skills integrate into agents through two mechanisms:
 ```markdown
 ### IMPORTANT
 - Apply `design-review` skill when validating architectural decisions
-- Apply `terminal-safety` skill before running terminal commands
+- Apply `terminal-usage` skill before running terminal commands
 ```
 
 The agent reads the skill's SKILL.md via `read_file` when the skill becomes relevant. The skill description (in `copilot-instructions.md` or `<skill>` tag) triggers the load.

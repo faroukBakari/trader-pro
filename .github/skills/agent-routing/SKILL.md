@@ -22,7 +22,6 @@ Use this skill to (1) identify when to delegate work to specialist agents, and (
 | `implement` | Code execution | Writing code, running tests, making changes, plan execution | Sonnet |
 | `rca` | Root cause analysis | Hypothesis-driven debugging | Opus |
 | `doc-update` | Doc update planning | Documentation refresh after code changes | Sonnet |
-| `doc-assess` | Doc health audit | Comprehensive documentation quality assessment | Opus |
 | `type-fix` | Type error resolution | Fix mypy/pyright/vue-tsc failures systematically | Sonnet |
 | `ia-coord` | Agentic design | Create agents/subagents/prompts/skills | Opus |
 
@@ -33,8 +32,6 @@ Use this skill to (1) identify when to delegate work to specialist agents, and (
 | `research` | Information gathering | Haiku | Codebase search, web fetch, synthesis |
 | `extract` | File analysis | Haiku | Targeted extraction or holistic digest |
 | `doc-awareness` | Doc discovery | Haiku | Index-driven doc finding + insight extraction |
-| `request-refinement` | Gap analysis | Sonnet | Request completeness, ambiguity detection |
-| `multi-edit` | Batch code editing | Sonnet | Coordinated multi-file edits (apply/derive) |
 | `command` | Terminal execution | Haiku | Large-output commands, parallel runs, daemon mgmt |
 
 ---
@@ -62,7 +59,6 @@ Use this skill to (1) identify when to delegate work to specialist agents, and (
 │     Tests/coverage → `backend-test` agent                       │
 │     Security/quality → `review` agent                           │
 │     Architecture → `advisor` agent                              │
-│     Multi-file edits → `multi-edit` subagent                    │
 │     Complex commands → `command` subagent                       │
 │     NO  → Continue inline                                       │
 │                                                                 │
@@ -99,7 +95,6 @@ Use this skill to (1) identify when to delegate work to specialist agents, and (
 | Post-implementation validation | Offer `review` handoff |
 | New test suite needed | Delegate to `backend-test` agent |
 | Architecture decision required | Use `advisor` agent for analysis |
-| Coordinated edits across 3+ files | Use `multi-edit` subagent |
 | Large-output or parallel commands | Use `command` subagent |
 
 ---
@@ -240,60 +235,6 @@ I will use your findings to [implement correctly / follow project conventions / 
 
 **Good example**: "Context: Adding a new REST endpoint to the broker module (`GET /positions`). Background: This endpoint needs auth, versioning, and OpenAPI spec generation. Prior knowledge: We've already read the module's existing `api/v1.py` and understand the router pattern. Output: Versioning conventions, OpenAPI spec generation flow, and authentication middleware wiring — focus on what we haven't seen in `api/v1.py`. I will use your findings to ensure the endpoint follows all project conventions."
 
-### `request-refinement` — Gap Analysis
-
-```
-Analyze this user request for completeness and ambiguity:
-
-**User Request**: "{the user's exact original request}"
-
-**Available Context**:
-- Current file: {file path or "none"}
-- Conversation history: {summary of relevant prior context}
-- Project type: {e.g., "full-stack trading platform with modular backend"}
-
-**Prior knowledge**: {any context gathered that helps scope the request}
-
-**Caller Intent**: I will use your report to either proceed (if no critical gaps) or ask the user targeted questions via `mode-interactive` (if critical gaps exist).
-
-Output: Structured gap report with context decomposition table, bridged assumptions with rationale, and critical gaps with suggested clarification questions ranked by impact.
-```
-
-### `multi-edit` — Batch Code Editing
-
-**Apply mode** (pre-specified edits):
-```
-Apply these edits:
-
-File: path/to/file1.py
-- Old: `exact string to replace with 3-5 lines context`
-  New: `replacement string`
-
-File: path/to/file2.ts
-- Old: `exact string to replace with 3-5 lines context`
-  New: `replacement string`
-
-Background: [why these changes are being made]
-Constraints: [e.g., preserve API compatibility, follow existing naming patterns]
-
-Output: Edit report showing success/failure per file with line references, plus verification results.
-Verify: [get_errors | lint | format | none]
-```
-
-**Derive mode** (intent-driven):
-```
-Make these changes across [scope/files]:
-- [High-level change description 1]
-- [High-level change description 2]
-
-Background: [why these changes are needed]
-Constraints: [patterns to follow, APIs to preserve, naming conventions]
-Prior knowledge: [reference implementation showing the pattern, e.g., "Follow the pattern in `modules/auth/api/v1.py`"]
-
-Output: Edit report with all changes applied, verification results, and any errors introduced.
-Verify: [get_errors | lint | format | none]
-```
-
 ### `command` — Terminal Execution
 
 ```
@@ -331,8 +272,6 @@ BEFORE INVOKING: {subagent_name}
 │   ├── Read-only codebase search → research
 │   ├── File-specific data points or module digest → extract
 │   ├── Documentation guidance → doc-awareness
-│   ├── Request gap analysis → request-refinement
-│   ├── Multi-file code changes → multi-edit
 │   └── Complex/large-output terminal commands → command
 │
 └── 4. WORTH DELEGATING?
@@ -353,7 +292,6 @@ BEFORE INVOKING: {subagent_name}
 | **Scope omission** | No directory or file boundaries → searches entire codebase | Always specify paths, modules, or file patterns (C2) |
 | **Re-discovery waste** | Not sharing known facts → subagent re-finds them | Include prior knowledge summary (C5) to prevent redundant exploration |
 | **Over-delegation** | Simple 3-step tasks don't need subagent isolation | Proceed inline — subagent overhead costs tokens and adds latency |
-| **Under-specified edits** | "Fix the types" to multi-edit → wrong changes derived | Provide specific changes or: target files, reference pattern, constraints (C4) |
 | **Missing constraints** | Not mentioning project rules → subagent violates conventions | Include relevant conventions (C4): module boundaries, naming, patterns |
 
 ---
@@ -366,5 +304,5 @@ BEFORE INVOKING: {subagent_name}
 | `plan-implement` | Plan agent produces input for implement agent |
 | `design-review` | Advisor agent uses design-review skill internally |
 | `debug-hypothesis` | May trigger research subagent for hypothesis validation |
-| `request-evaluation` | Used by request-refinement subagent — don't duplicate inline |
-| `terminal-safety` | Applied by command subagent — don't re-apply when delegating |
+| `request-evaluation` | Apply inline for request gap analysis — all agents handle directly |
+| `terminal-usage` | Applied by command subagent — don't re-apply when delegating |
