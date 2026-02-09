@@ -1,32 +1,29 @@
 ---
 name: doc-assess
-agent: "doc-assess"
-description: "Use doc-assess agent to audit documentation health"
+agent: "advisor"
+model: "Claude Sonnet 4.5 (copilot)"
+description: "Audit documentation health with 6-dimension scoring"
+argument-hint: "What to assess? (directory, module, or 'full audit')"
 ---
 
-${input:request:What documentation to assess? (or say 'full audit')}
+${input:scope:What documentation to assess? (e.g. docs/, backend/docs/, or 'full audit')}
 
 ## Context
 
-You are a **Documentation Quality Auditor**. Comprehensive health assessment across 6 dimensions.
+Assess documentation health for: **${scope}**
 
-### Key Rules
-- Read `docs/DOCUMENTATION-GUIDE.md` first
-- Never assess generated code docs
-- Produce actionable remediation, not vague feedback
-- Check docs against actual code
-- Use `make` targets — never raw `npm`, `poetry`, `pip`, or `python` commands
+- Start from `docs/DOCUMENTATION-GUIDE.md` for structure discovery
+- Skip `*_generated/` directories
+- Check docs against actual codebase state
 
-### Methodology
-1. **Scope & Context** — Build file inventory via research subagent
-2. **Health Assessment** — Score 6 dimensions (1-10 scale)
-3. **Gap Mapping** — Identify specific gaps per dimension
-4. **Remediation Plan** — Prioritize actions with effort/impact ratings
+## Deliverable
 
-### Output
-Scorecard (Comprehensiveness/Accuracy/Discoverability/Maintainability/Completeness/Consistency + overall), Gap Summary, Remediation Plan (Quick Wins / Strategic / Backlog).
+Apply the `doc-assessment` skill (from `.github/skills/doc-assessment/SKILL.md`):
 
-### Skills
-Apply these skills from `.github/skills/`: doc-update
+1. **Scorecard** — 6 dimensions scored 1-10 with overall rating
+2. **Gap Summary** — specific gaps per low-scoring dimension
+3. **Remediation Plan** — prioritized actions (Quick Wins / Strategic / Backlog)
+
+Save the remediation plan to `docs/tmp/doc-remediation-plan.md`.
 
 $ARGUMENTS

@@ -25,6 +25,25 @@ The `vscode` tool is a **mandatory tool for all agents and subagents**. It provi
 
 **Rule**: Every agent/subagent MUST include `'vscode'` in its `tools:` list. It is the primary mechanism for interactive user input (`askQuestions`) and IDE automation (`runCommand`).
 
+### MCP Tool: `filesystem`
+
+The `filesystem` MCP server (`@ai-capabilities-suite/mcp-filesystem`) provides **workspace-confined filesystem operations** as an alternative to terminal commands for file/directory manipulation.
+
+| Tool | Purpose |
+|------|---------|
+| `fs_batch_operations` | Atomic move/copy/delete with rollback on failure |
+| `fs_copy_directory` | Recursive directory copy with exclusions |
+| `fs_sync_directory` | Sync newer/missing files between directories |
+| `fs_search_files` | Indexed file search by name, content, or metadata |
+| `fs_build_index` | Build search index for fast repeated queries |
+| `fs_create_symlink` | Create symlinks within workspace boundary |
+| `fs_compute_checksum` | File integrity hash (md5/sha256) |
+| `fs_verify_checksum` | Verify file against known hash |
+| `fs_analyze_disk_usage` | Disk usage breakdown by path/type |
+| `fs_watch_directory` | Real-time directory monitoring |
+
+**When to use**: Apply the `fs-operations` skill for routing decisions between MCP filesystem tools, built-in editor tools, and terminal commands.
+
 ---
 
 ## 1. Role & Philosophy
@@ -131,7 +150,7 @@ import type { PreOrder as PreOrder_Backend } from '...'
 ### Pre-Command Reasoning (Required)
 **IMPORTANT: STOP and THINK before executing ANY terminal command.**
 
-**Apply the `terminal-safety` skill** for comprehensive command safety patterns.
+**Apply the `terminal-usage` skill** for command safety checks and delegation routing.
 
 Before running a command, explicitly reason through these 3 checks:
 
@@ -276,13 +295,9 @@ Before complex tasks, consider whether a specialist agent could achieve better r
 | `implement` | Implementation engineer — freeform coding or plan execution with validation | "implement", "build", "fix", "follow plan", "execute plan" |
 | `rca` | Root cause analysis, hypothesis-driven debugging | "debug", "why", "investigate failure" |
 | `doc-update` | Documentation update planning | "update docs", "doc drift", "document changes" |
-| `doc-assess` | Comprehensive doc health assessment | "assess docs", "doc audit", "documentation quality" |
 | `type-fix` | Fix type errors systematically | "fix types", "type error", "mypy/pyright fail" |
 | `doc-awareness` | Documentation context discovery and extraction (subagent) | Delegated for doc-aware task context, documentation guidance |
-| `extract` | Large file analysis, holistic summaries (subagent) | Delegated for targeted data extraction or compressed digests |
 | `research` | High-fidelity information gathering with adaptive depth (subagent) | Delegated for context discovery, cross-file synthesis, relevance-filtered research |
-| `request-refinement` | Request completeness analysis, gap detection (subagent) | Delegated for pre-flight request validation before planning/implementation |
-| `multi-edit` | Coordinated multi-file editing, batch apply/derive (subagent) | Delegated for FinOps-efficient batch code editing with lightweight verification |
 | `command` | Large-output command execution, parallel runs, daemon management (subagent) | Delegated for env-aware terminal execution with full output capture and cleanup |
 | `verify` | Multi-file verification with pass/fail verdicts (subagent) | Delegated for mid-complexity checks, multi-file validation, and command-based verification with structured verdict reports |
 | `playwright` | Browser automation via Playwright MCP (subagent) | Delegated for UI inspection, interaction, debugging, and visual verification with lean result extraction |
@@ -290,20 +305,19 @@ Before complex tasks, consider whether a specialist agent could achieve better r
 ### Quick Decision Rules
 
 1. **Creating agents/prompts/skills?** → `ia-coord` agent (enforces three-layer model)
-2. **Creating a subagent?** → `ia-coord` agent (uses `subagent-template.md`, enforces SA-1–SA-7)
+2. **Creating a subagent?** → `ia-coord` agent (uses `templates/subagent-template.md`, enforces SA-1–SA-7)
 3. **Need context you don't have?** → `research` subagent first
-3. **Multi-file feature?** → `plan` before `implement`
-4. **Writing backend tests?** → `backend-test` agent
-5. **Writing frontend tests?** → `frontend-test` agent
-6. **Large change complete?** → Offer `review` handoff
-7. **Architecture question?** → `advisor` agent
-8. **Have a plan to execute?** → `implement` agent (plan execution mode)
-9. **Debugging complex issue?** → `rca` agent
-10. **Documentation needs update?** → `doc-update` (planning) or `doc-assess` (audit)
-11. **Type errors failing CI?** → `type-fix` agent
-12. **Need documentation context for a task?** → `doc-awareness` subagent
-13. **Ambiguous or complex user request?** → `request-refinement` subagent, then `mode-interactive` for gaps
-14. **Multi-file batch edits?** → `multi-edit` subagent for coordinated changes
+4. **Multi-file feature?** → `plan` before `implement`
+5. **Writing backend tests?** → `backend-test` agent
+6. **Writing frontend tests?** → `frontend-test` agent
+7. **Large change complete?** → Offer `review` handoff
+8. **Architecture question?** → `advisor` agent
+9. **Have a plan to execute?** → `implement` agent (plan execution mode)
+10. **Debugging complex issue?** → `rca` agent
+11. **Documentation needs update?** → `doc-update` (planning) or `/doc-assess` prompt (audit via `doc-assessment` skill)
+12. **Type errors failing CI?** → `type-fix` agent
+13. **Need documentation context for a task?** → `doc-awareness` subagent
+14. **Ambiguous or complex user request?** → Apply `request-evaluation` skill inline, then `mode-interactive` for critical gaps
 15. **Large output or parallel commands?** → `command` subagent for isolated terminal execution with full capture
 16. **Need multi-file verification with verdicts?** → `verify` subagent for structured pass/fail checks across files and commands
 17. **Need browser/UI inspection or interaction?** → `playwright` subagent for isolated browser automation with lean results

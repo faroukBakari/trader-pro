@@ -277,15 +277,15 @@ VS Code confirms: _"VS Code can run multiple subagents simultaneously."_ This ma
 
 These rules are **conditional extensions** to A1–A9 — they apply when `user-invokable: false`:
 
-| Rule                           | Requirement                                                           | Rationale                                         |
-| ------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------- |
-| **SA-1: Naming & Visibility**  | File is `{name}.sub.agent.md`; `user-invokable: false` is mandatory   | Deployment mode indicator + discoverability        |
-| **SA-2: Model Downgrade**      | Model at most one tier below intended parent              | FinOps: cheap models for grunt work               |
-| **SA-3: Minimal Tool Set**     | Principle of least privilege on tools                     | Read-only subagent ≠ needs `edit` or `bash`       |
-| **SA-4: Caller Protocol**      | Must document invocation interface in `<caller_protocol>` | Parent needs to know prompt format                |
-| **SA-5: Output Contract**      | Must document return format in `<output_format>`          | Parent needs predictable response structure       |
-| **SA-6: No Handoffs**          | Never has `handoffs:` in frontmatter                      | Subagents don't interact with users               |
-| **SA-7: No Nested Delegation** | Should not spawn sub-subagents (depth = 1)                | Prevents cascading costs and debugging complexity |
+| Rule                           | Requirement                                                         | Rationale                                         |
+| ------------------------------ | ------------------------------------------------------------------- | ------------------------------------------------- |
+| **SA-1: Naming & Visibility**  | File is `{name}.sub.agent.md`; `user-invokable: false` is mandatory | Deployment mode indicator + discoverability       |
+| **SA-2: Model Downgrade**      | Model at most one tier below intended parent                        | FinOps: cheap models for grunt work               |
+| **SA-3: Minimal Tool Set**     | Principle of least privilege on tools                               | Read-only subagent ≠ needs `edit` or `bash`       |
+| **SA-4: Caller Protocol**      | Must document invocation interface in `<caller_protocol>`           | Parent needs to know prompt format                |
+| **SA-5: Output Contract**      | Must document return format in `<output_format>`                    | Parent needs predictable response structure       |
+| **SA-6: No Handoffs**          | Never has `handoffs:` in frontmatter                                | Subagents don't interact with users               |
+| **SA-7: No Nested Delegation** | Should not spawn sub-subagents (depth = 1)                          | Prevents cascading costs and debugging complexity |
 
 #### SA-3: Tool Privilege Reference
 
@@ -737,12 +737,12 @@ Skills are registered in `<skill>` tags within agents or the copilot-instruction
 
 Templates for creating each layer are maintained as agent files and used by `ia-coord`:
 
-| Template            | Location                               | Purpose                                                        |
-| ------------------- | -------------------------------------- | -------------------------------------------------------------- |
-| Agent Blueprint     | `.github/agents/agent-template.md`     | Full agent structure with YAML, role, constraints, methodology |
-| Subagent Blueprint  | `.github/agents/subagent-template.md`  | Subagent structure with caller protocol, output contract, SA gates |
-| Prompt Blueprint    | `.github/agents/prompt-template.md`    | Thin prompt structure enforcing ≤50 lines                      |
-| Skill Blueprint     | `.github/agents/skill-template.md`     | Portable skill structure with progressive disclosure           |
+| Template           | Location                                        | Purpose                                                            |
+| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------ |
+| Agent Blueprint    | `.github/agents/templates/agent-template.md`    | Full agent structure with YAML, role, constraints, methodology     |
+| Subagent Blueprint | `.github/agents/templates/subagent-template.md` | Subagent structure with caller protocol, output contract, SA gates |
+| Prompt Blueprint   | `.github/agents/templates/prompt-template.md`   | Thin prompt structure enforcing ≤50 lines                          |
+| Skill Blueprint    | `.github/agents/templates/skill-template.md`    | Portable skill structure with progressive disclosure               |
 
 Subagents follow a **dedicated template** because they have 7 mandatory structural differences from user-facing agents (SA-1 to SA-7): forced `user-invokable: false`, `.sub.agent.md` naming, no handoffs, no nested agents, mandatory `<caller_protocol>`, mandatory `<output_format>`, and model-downgraded tools.
 
@@ -757,12 +757,12 @@ The `ia-coord` agent automatically selects the appropriate template based on the
 
 ### Naming Conventions
 
-| Asset | File Pattern | Example |
-|-------|-------------|----------|
-| User-facing agent | `{name}.agent.md` | `implement.agent.md` |
-| Subagent (hidden) | `{name}.sub.agent.md` | `research.sub.agent.md` |
-| Prompt | `{name}.prompt.md` | `study.prompt.md` |
-| Skill | `{name}/SKILL.md` | `debug-hypothesis/SKILL.md` |
+| Asset             | File Pattern          | Example                     |
+| ----------------- | --------------------- | --------------------------- |
+| User-facing agent | `{name}.agent.md`     | `implement.agent.md`        |
+| Subagent (hidden) | `{name}.sub.agent.md` | `research.sub.agent.md`     |
+| Prompt            | `{name}.prompt.md`    | `study.prompt.md`           |
+| Skill             | `{name}/SKILL.md`     | `debug-hypothesis/SKILL.md` |
 
 ---
 
@@ -854,16 +854,16 @@ Summarize what was created:
 
 ### Project-Specific Files
 
-| File                                | Purpose                                       |
-| ----------------------------------- | --------------------------------------------- |
-| `.github/copilot-instructions.md`   | Base instructions + agent catalog (Section 9) |
-| `.github/agents/ia-coord.agent.md`      | Master coordinator enforcing this methodology |
-| `.github/agents/research.sub.agent.md`  | Research subagent (Haiku, read-only)          |
-| `.github/agents/extract.sub.agent.md`   | Extraction subagent (Haiku, read-only)        |
-| `.github/agents/agent-template.md`      | Agent creation blueprint                      |
-| `.github/agents/subagent-template.md`   | Subagent creation blueprint                   |
-| `.github/agents/prompt-template.md`     | Prompt creation blueprint                     |
-| `.github/agents/skill-template.md`      | Skill creation blueprint                      |
+| File                                            | Purpose                                       |
+| ----------------------------------------------- | --------------------------------------------- |
+| `.github/copilot-instructions.md`               | Base instructions + agent catalog (Section 9) |
+| `.github/agents/ia-coord.agent.md`              | Master coordinator enforcing this methodology |
+| `.github/agents/research.sub.agent.md`          | Research subagent (Haiku, read-only)          |
+| `.github/agents/extract.sub.agent.md`           | Extraction subagent (Haiku, read-only)        |
+| `.github/agents/templates/agent-template.md`    | Agent creation blueprint                      |
+| `.github/agents/templates/subagent-template.md` | Subagent creation blueprint                   |
+| `.github/agents/templates/prompt-template.md`   | Prompt creation blueprint                     |
+| `.github/agents/templates/skill-template.md`    | Skill creation blueprint                      |
 
 ---
 

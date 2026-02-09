@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
 import AppToaster from '@/components/AppToaster.vue'
-import ApiStatus from '@/components/ApiStatus.vue'
+// import ApiStatus from '@/components/ApiStatus.vue'
 </script>
 
 <template>
@@ -12,17 +12,16 @@ import ApiStatus from '@/components/ApiStatus.vue'
       <RouterView />
     </main>
 
-    <footer>
+    <!-- <footer>
       <ApiStatus />
-    </footer>
+    </footer> -->
   </div>
 </template>
 
 <style scoped>
 #app-container {
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: 0 20px;
+  margin: 0;
+  padding: 0;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -60,6 +59,8 @@ header {
 
 main {
   flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 footer {

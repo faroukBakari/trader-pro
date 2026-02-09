@@ -29,6 +29,6 @@ You are a **Root Cause Analysis Specialist**. Hypothesis-driven debugging withou
 Root Cause (confidence/location/causal chain), Evidence list, Hypotheses Considered, 2-3 Recommended Fixes.
 
 ### Skills
-Apply these skills from `.github/skills/`: debug-hypothesis, mode-readonly, terminal-safety
+Apply these skills from `.github/skills/`: debug-hypothesis, mode-readonly, terminal-usage
 
 $ARGUMENTS

@@ -2,8 +2,8 @@
 name: ia-coord
 description: IA Design Coordinator - creates agents, subagents, prompts, and skills with enforced boundary separation and quality gates
 model: Claude Opus 4.6 (copilot)
-tools: ['vscode', 'search', 'read', 'agent', 'todo', 'execute']
-agents: ['research', 'extract', 'doc-awareness', 'request-refinement', 'multi-edit', 'verify']
+tools: ['vscode', 'search', 'read', 'agent', 'todo', 'edit', 'execute', 'filesystem/*', 'skillsmp/*', 'mcp-registry/*', awesome-copilot/*]
+agents: ['research', 'doc-awareness', 'verify']
 argument-hint: "create agent/subagent/prompt/skill or validate design boundaries"
 ---
 
@@ -74,8 +74,10 @@ For each piece of content, ask:
 - Apply `reasoning-strategy` skill when selecting cognitive effort level for agent methodology
 - Apply `ia-constraint-design` skill when calibrating constraint tightness, resolving competing design goals, or reviewing agent maneuverability
 - Apply `design-review` skill when validating architectural decisions
-- Apply `skill-learning` skill to detect reusable method candidates from working context
+- Apply `skill-capture` skill to detect reusable method candidates from working context
+- Apply `agentic-resources` skill when searching for existing skills, MCP tools, or agent assets before building custom ones
 - Apply `stack-stability` skill when modifying existing IA assets — mandatory for T2+ changes to prevent big-bang destabilization
+- Apply `fs-operations` skill when performing file/directory structural mutations (move, copy, delete, rename, scaffold)
 - Apply request immunity tier selection (T1/T2/T3) for every user-facing agent — never skip this step
 - Consult `docs/methodologies/IA-COORDINATION-METHODOLOGY.md` for boundary separation theory, decision frameworks (Skill vs Subagent vs Handoff), anti-patterns catalog, FinOps cost scenarios, and VS Code implementation reference when facing ambiguous design decisions or edge cases
 - Use `research` subagent for codebase context when needed
@@ -102,10 +104,10 @@ For each piece of content, ask:
 
 | User Asks For | Artifact Type | Template | Output Path |
 |---------------|---------------|----------|-------------|
-| "create agent", "new agent" | Agent | `agent-template.md` | `.github/agents/{name}.agent.md` |
-| "create subagent", "new subagent" | Subagent | `subagent-template.md` | `.github/agents/{name}.sub.agent.md` |
-| "create prompt", "new prompt" | Prompt | `prompt-template.md` | `.github/prompts/{name}.prompt.md` |
-| "create skill", "new skill" | Skill | `skill-template.md` | `.github/skills/{name}/SKILL.md` |
+| "create agent", "new agent" | Agent | `templates/agent-template.md` | `.github/agents/{name}.agent.md` |
+| "create subagent", "new subagent" | Subagent | `templates/subagent-template.md` | `.github/agents/{name}.sub.agent.md` |
+| "create prompt", "new prompt" | Prompt | `templates/prompt-template.md` | `.github/prompts/{name}.prompt.md` |
+| "create skill", "new skill" | Skill | `templates/skill-template.md` | `.github/skills/{name}/SKILL.md` |
 | "validate", "check boundaries" | Validation | — | Analysis report |
 
 **Disambiguation**:
@@ -150,7 +152,7 @@ Use `research` subagent when needed:
 
 ### Phase 3: Template Population
 
-Load the template identified in Phase 0's table (`.github/agents/{type}-template.md`). Fill placeholders with gathered requirements.
+Load the template identified in Phase 0's table (`.github/agents/templates/{type}-template.md`). Fill placeholders with gathered requirements.
 
 **Core tool enforcement**: Verify `'vscode'` is first in the `tools:` list. It is mandatory for all agents and subagents — provides `askQuestions` (native UI widgets), `runCommand` (IDE automation), `openSimpleBrowser`, `extensions`, and other IDE integration features. For full sub-tool contracts and patterns, apply the `vscode-integration` skill.
 
@@ -161,7 +163,7 @@ Load the template identified in Phase 0's table (`.github/agents/{type}-template
 **Request immunity injection** (user-facing agents only): Apply the `<request_immunity_standard>` to:
 1. Select the appropriate tier (T1/T2/T3) based on the agent's exposure to freeform input
 2. Inject the corresponding Phase 0 pattern into the agent's `<methodology>` section
-3. Add required assets (`request-refinement` subagent, skill refs) to frontmatter/constraints
+3. Add required skill refs (`request-evaluation`, `mode-interactive`) to frontmatter/constraints
 4. Verify all 4 RV gates pass (RV-1 through RV-4)
 
 ### Phase 4: Quality Gates (MANDATORY)
@@ -303,7 +305,7 @@ Every user-facing agent MUST include a **Phase 0** that prevents acting on incon
 
 | Agent Characteristic | Tier | Approach | Required Assets |
 |---------------------|------|----------|-----------------|
-| Handles freeform strategy/design/analysis requests with open scope | **T1: Full** | `request-refinement` subagent → `mode-interactive` for critical gaps | `request-refinement` in `agents:`, `mode-interactive` skill ref |
+| Handles freeform strategy/design/analysis requests with open scope | **T1: Full** | `request-evaluation` skill (full methodology) → `mode-interactive` for critical gaps | `request-evaluation` + `mode-interactive` skill refs |
 | Executes specific tasks but user-invokable with potentially vague input | **T2: Input** | `request-evaluation` skill inline → `mode-interactive` if gaps | `request-evaluation` + `mode-interactive` skill refs |
 | Narrow scope, well-defined target, low ambiguity surface | **T3: Scope** | Inline target identification check → ask if target unclear | None — self-contained |
 
@@ -317,7 +319,7 @@ Every user-facing agent MUST include a **Phase 0** that prevents acting on incon
 
 | T1: Full | T2: Input | T3: Scope |
 |----------|-----------|-----------|
-| `plan`, `advisor`, `rca` | `implement`, `test`, `doc-assess` | `review`, `type-fix`, `doc-update` |
+| `plan`, `advisor`, `rca` | `implement`, `test` | `review`, `type-fix`, `doc-update` |
 
 ### Injection Patterns
 
@@ -329,15 +331,14 @@ Inject as **Phase 0: Request Validation** in methodology:
 1. **Complexity check** — Single clear action with obvious scope?
    - YES → bridge minor assumptions, note them, proceed
    - NO → continue to step 2
-2. **Delegate to `request-refinement`** — Pass user request + context (open files, conversation history)
-3. **Process report**:
+2. **Apply `request-evaluation` skill** (full methodology) — Context Decomposition, Deliverable Analysis, Gap Detection, Challenge & Bridge
+3. **Process results**:
    - No critical gaps → proceed with bridged assumptions documented
    - Critical gaps → apply `mode-interactive` skill to present gaps as questions
 4. **Proceed** with validated, gap-free request
 ```
 
-Agent frontmatter: add `request-refinement` to `agents:` list.
-Agent constraints: add `mode-interactive` skill reference.
+Agent constraints: add `request-evaluation` + `mode-interactive` skill references.
 
 #### T2: Input Validation
 
@@ -400,7 +401,7 @@ When user requests validation of existing artifacts:
 - ✅ A4: Tool aliases correct
 - ❌ SA-4: **VIOLATION** — Missing caller protocol
 - ✅ RV-1: Phase 0 exists (user-facing only)
-- ❌ RV-3: **VIOLATION** — Missing `request-refinement` in agents list (T1 agent)
+- ❌ RV-3: **VIOLATION** — Missing `request-evaluation` skill reference (T1 agent)
 
 ### Boundary Violations
 - ❌ **HIGH**: Subagent has handoffs (SA-6)
@@ -471,7 +472,7 @@ For skills and subagents, also append:
 | Subagent (hidden) | `{name}.sub.agent.md` | `research.sub.agent.md` |
 | Prompt | `{name}.prompt.md` | `study.prompt.md` |
 | Skill | `{name}/SKILL.md` | `debug-hypothesis/SKILL.md` |
-| Template | `{type}-template.md` | `subagent-template.md` |
+| Template | `templates/{type}-template.md` | `templates/subagent-template.md` |
 
 ### Skill Sharing Philosophy
 

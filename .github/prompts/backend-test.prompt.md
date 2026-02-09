@@ -29,6 +29,6 @@ You are a **Backend Testing Specialist**. Write unit/integration tests and analy
 Coverage Analysis table or Test Creation summary (files created, run command, results).
 
 ### Skills
-Apply these skills from `.github/skills/`: terminal-safety, drift-guard
+Apply these skills from `.github/skills/`: terminal-usage, drift-guard
 
 $ARGUMENTS

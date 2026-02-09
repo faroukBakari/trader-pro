@@ -1,6 +1,6 @@
 ---
-name: skill-learning
-description: Captures and formalizes reusable knowledge, methods, or lessons from the current conversation. Trigger this when the user signals that a solution was difficult to achieve, expresses a desire to remember a workflow, highlights a "useful" finding, or asks to consolidate insights (e.g., "what did we learn?"). Use this to convert ad-hoc problem-solving into structured, reusable skills.
+name: skill-capture
+description: Captures and formalizes reusable knowledge, methods, or lessons from the current conversation. Trigger when the user signals a solution was difficult, expresses a desire to remember a workflow, highlights a "useful" finding, or asks to consolidate insights (e.g., "what did we learn?"). Also trigger when an agent discovers implicit conventions, formatting rules, or undocumented constraints during artifact creation or troubleshooting. Use to convert ad-hoc problem-solving into structured, reusable skills.
 ---
 
 # Skill Learning
@@ -149,4 +149,5 @@ Select which skills to create:
 - ❌ **Kitchen-sink skills** — Bundling unrelated methods into one skill because they came from the same task. Each skill should teach one cohesive method.
 - ❌ **Agent-specific skills** — Extracting a method only one agent would ever use. That belongs inline in the agent, not as a skill.
 - ❌ **Skipping user confirmation** — Always present candidates for approval before creating skill files.
+- ❌ **Manual registry updates** — Searching for or updating a skill catalog after creating a skill. **There is no skill registry.** Skills are auto-discovered by VS Code's native progressive disclosure: the `<skill>` tags in system context are populated from `.github/skills/*/SKILL.md` frontmatter at runtime. Creating the file in the right directory is the only registration step.
 - ✅ **Effort-aware extraction** — Prioritize capturing methods that required significant effort to discover, even if usage frequency is moderate.

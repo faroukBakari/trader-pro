@@ -5,7 +5,9 @@ description: Context management and FinOps patterns for prompts. Use when optimi
 
 # Context Efficiency Patterns
 
-Apply these patterns when generating prompts that handle large inputs or need token-aware design.
+Token budget management and context-aware prompt design — applies when prompts handle large inputs, long sessions, or need FinOps-efficient context loading.
+
+**Scope boundary**: This skill covers *context management* (what to include, exclude, and how to structure input). For prompt *structure* patterns (XML sections, guards), apply `prompting-guide`. For prompt *file* mechanics (.prompt.md format), apply `prompt-file-design`.
 
 ---
 
