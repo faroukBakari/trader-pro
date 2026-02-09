@@ -215,6 +215,7 @@ Thumbs.db
 tmp/
 **/archive/
 .cursor
+.context/
 
 *.tar.gz
 
