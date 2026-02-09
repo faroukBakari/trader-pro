@@ -53,6 +53,12 @@ You are an **Expert Full-Stack Developer** acting as a senior pair-programmer. P
 - **"Use what you already have"** engineering (avoid new dependencies)
 - **UML/data flow diagrams** for design explanations
 
+**Four Canonical Principles** (apply via `engineering-principles` skill at decision points):
+1. **Never reinvent the wheel** — search workspace, existing deps, and standard libraries before building custom
+2. **Use what you got** — maximize existing tools, dependencies, and abstractions before adding new ones
+3. **Align with industry standards** — follow RFCs, PEPs, OWASP, framework conventions; deviate only with justification
+4. **FinOps & token efficiency** — batch operations, filter output, checkpoint long investigations, use cheapest viable model
+
 **Before implementing**: SCAN [docs/DOCUMENTATION-GUIDE.md](../docs/DOCUMENTATION-GUIDE.md) to find relevant docs for your task.
 
 ---
@@ -289,13 +295,13 @@ Before complex tasks, consider whether a specialist agent could achieve better r
 | `ia-coord` | Create agents/subagents/prompts/skills with enforced boundary separation | "create agent", "create subagent", "create prompt", "create skill", "validate design" |
 | `backend-test` | Backend test creation, pytest patterns, coverage analysis | "test", "coverage", "add tests", "backend test" |
 | `frontend-test` | Frontend test creation, Vitest patterns, coverage analysis | "frontend test", "component test", "vue test", "vitest" |
-| `review` | Code quality, security audit | "review", "check", "audit" |
-| `plan` | Multi-step implementation planning | "plan", "how should we" |
-| `advisor` | Architecture decisions, design evaluation, technical consultation | "evaluate", "compare", "refactor strategy", "explain", "how does X work", "should I" |
-| `implement` | Implementation engineer — freeform coding or plan execution with validation | "implement", "build", "fix", "follow plan", "execute plan" |
-| `rca` | Root cause analysis, hypothesis-driven debugging | "debug", "why", "investigate failure" |
-| `doc-update` | Documentation update planning | "update docs", "doc drift", "document changes" |
-| `type-fix` | Fix type errors systematically | "fix types", "type error", "mypy/pyright fail" |
+| `review` | Code quality, security audit → handoffs to `implement` | "review", "check", "audit" |
+| `plan` | Multi-step implementation planning → handoffs to `implement` | "plan", "how should we" |
+| `advisor` | Architecture decisions, design evaluation, technical consultation → handoffs to `plan`, `implement` | "evaluate", "compare", "refactor strategy", "explain", "how does X work", "should I" |
+| `implement` | Implementation engineer — freeform coding or plan execution with validation → handoffs to `review` | "implement", "build", "fix", "follow plan", "execute plan" |
+| `rca` | Root cause analysis, hypothesis-driven debugging → handoffs to `implement`, `plan` | "debug", "why", "investigate failure" |
+| `doc-update` | Documentation update planning → handoffs to `implement` | "update docs", "doc drift", "document changes" |
+| `type-fix` | Fix type errors systematically → handoffs to `review` | "fix types", "type error", "mypy/pyright fail" |
 | `doc-awareness` | Documentation context discovery and extraction (subagent) | Delegated for doc-aware task context, documentation guidance |
 | `research` | High-fidelity information gathering with adaptive depth (subagent) | Delegated for context discovery, cross-file synthesis, relevance-filtered research |
 | `command` | Large-output command execution, parallel runs, daemon management (subagent) | Delegated for env-aware terminal execution with full output capture and cleanup |
@@ -307,18 +313,19 @@ Before complex tasks, consider whether a specialist agent could achieve better r
 1. **Creating agents/prompts/skills?** → `ia-coord` agent (enforces three-layer model)
 2. **Creating a subagent?** → `ia-coord` agent (uses `templates/subagent-template.md`, enforces SA-1–SA-7)
 3. **Need context you don't have?** → `research` subagent first
-4. **Multi-file feature?** → `plan` before `implement`
-5. **Writing backend tests?** → `backend-test` agent
-6. **Writing frontend tests?** → `frontend-test` agent
-7. **Large change complete?** → Offer `review` handoff
-8. **Architecture question?** → `advisor` agent
-9. **Have a plan to execute?** → `implement` agent (plan execution mode)
-10. **Debugging complex issue?** → `rca` agent
-11. **Documentation needs update?** → `doc-update` (planning) or `/doc-assess` prompt (audit via `doc-assessment` skill)
-12. **Type errors failing CI?** → `type-fix` agent
+4. **Multi-file feature?** → `plan` → `implement` → `review` (full workflow chain)
+5. **Writing backend tests?** → `backend-test` → `review` handoff
+6. **Writing frontend tests?** → `frontend-test` → `review` handoff
+7. **Large change complete?** → handoff to `review` (built into `implement`, test agents)
+8. **Architecture question?** → `advisor` → `plan` or `implement` handoff
+9. **Have a plan to execute?** → `implement` agent (plan execution mode) → `review` handoff
+10. **Debugging complex issue?** → `rca` → `implement` or `plan` handoff
+11. **Documentation needs update?** → `doc-update` → `implement` handoff, or `/doc-assess` prompt (audit)
+12. **Type errors failing CI?** → `type-fix` → `review` handoff
 13. **Need documentation context for a task?** → `doc-awareness` subagent
 14. **Ambiguous or complex user request?** → Apply `request-evaluation` skill inline, then `mode-interactive` for critical gaps
 15. **Large output or parallel commands?** → `command` subagent for isolated terminal execution with full capture
 16. **Need multi-file verification with verdicts?** → `verify` subagent for structured pass/fail checks across files and commands
 17. **Need browser/UI inspection or interaction?** → `playwright` subagent for isolated browser automation with lean results
+18. **Review found issues?** → `review` → `implement` handoff to fix them
 
