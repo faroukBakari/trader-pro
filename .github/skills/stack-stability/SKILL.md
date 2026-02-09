@@ -215,6 +215,40 @@ When a review trigger fires:
 
 ---
 
+## Skill Registry Overhead Monitoring
+
+The `<skills>` section in `copilot-instructions.md` loads **every skill's name, description, and file path** into every agent session. This is a hidden token tax — each skill entry costs ~30-50 tokens, and the entire registry is repeated in every conversation turn's system prompt.
+
+### Overhead Budget
+
+| Metric | Threshold | Action |
+|--------|-----------|--------|
+| **Total skills** | ≤ 50 | Within budget |
+| **Total skills** | 51-65 | Review for consolidation or deprecation |
+| **Total skills** | > 65 | **HALT** — skill sprawl. Run deprecation audit before adding more |
+| **Description length** | ≤ 2 lines per skill | Within budget |
+| **Description length** | > 2 lines | Trim — description is a routing hint, not documentation |
+
+### Monitoring Protocol
+
+When adding, modifying, or reviewing skills:
+
+1. **Count** — How many skills are currently in the registry? (check `<skills>` section)
+2. **Measure** — Is the new/modified description ≤ 2 lines? Does it serve as a routing hint (when to trigger) not a mini-manual?
+3. **Deduplicate** — Could this skill be merged with an existing one that covers overlapping territory?
+
+### Description Quality Gate
+
+Skill descriptions in the `<skills>` block serve exactly ONE purpose: **help the model decide whether to load the full SKILL.md**. They are routing signals, not documentation.
+
+| ✅ Good Description | ❌ Bad Description |
+|--------------------|-------------------|
+| "Web accessibility patterns following WCAG 2.1 AA. Use when building UI components or auditing accessibility." | "This skill provides comprehensive patterns for web accessibility including keyboard navigation, ARIA attributes, focus management, color contrast, screen reader support, semantic HTML, and more." |
+| Trigger-focused: "Use when X, Y, Z" | Feature-listing: "Covers A, B, C, D, E, F" |
+| ≤ 2 lines | > 3 lines |
+
+---
+
 ## Change Record Template
 
 For T2+ changes, document the decision:

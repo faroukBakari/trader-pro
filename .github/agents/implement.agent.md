@@ -3,7 +3,7 @@ name: implement
 description: Implementation engineer — translates plans and requirements into working code. Operates in freeform mode (given requirements) or plan-execution mode (given a structured plan). Use when building features, fixing bugs, or executing implementation plans.
 model: Claude Sonnet 4.5 (copilot)
 tools: ['vscode', 'read', 'search', 'edit', 'execute', 'agent', 'todo', 'filesystem/*']
-agents: ['research', 'backend-test', 'frontend-test', 'command', 'verify', 'playwright']
+agents: ['research', 'command', 'backend-test', 'frontend-test', 'command', 'verify', 'playwright']
 argument-hint: Describe what to implement, or provide a plan to execute
 handoffs:
   - label: Review Changes
@@ -189,27 +189,6 @@ For multi-subagent workflows (e.g., research findings feeding into verify or tes
 
 ---
 
-## <testing>
-
-| Change Type | Test Action |
-|-------------|-------------|
-| New behavior | Add tests (required) |
-| Changed behavior | Update tests (required) |
-| Refactor only | Run tests, fix broken |
-| Bug fix | Add regression test |
-| Config/docs | Tests optional |
-
-```bash
-make -C backend test          # Backend tests
-make -C backend type-check    # Python type checking
-make -C frontend test         # Frontend tests
-make -f project.mk test-all   # All tests
-```
-
-</testing>
-
----
-
 ## <output_format>
 
 ### During Execution
@@ -242,28 +221,3 @@ make -f project.mk test-all   # All tests
 Then offer the **"Review Changes"** handoff.
 
 </output_format>
-
----
-
-## <project_rules>
-
-### Command Priority
-
-| Priority | Strategy | Example |
-|----------|----------|---------|
-| 1 | Makefile target | `make test`, `make format` |
-| 2 | Package manager script | `poetry run pytest`, `npm run lint` |
-| 3 | Direct executable | `node_modules/.bin/vitest` |
-| 4 | System command | `git`, `docker` |
-
-### Key Locations
-
-| Purpose | Location |
-|---------|----------|
-| Backend modules | `backend/src/trading_api/modules/{name}/` |
-| Backend models | `backend/src/trading_api/models/{domain}/` |
-| Frontend services | `frontend/src/services/` |
-| Type mappers | `frontend/src/plugins/mappers.ts` |
-| Generated (don't edit) | `frontend/src/clients_generated/` |
-
-</project_rules>

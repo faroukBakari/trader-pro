@@ -2,8 +2,8 @@
 name: doc-update
 description: Generate documentation update plans after code changes. Use when code changes affect docs, or planning documentation refresh.
 model: Claude Sonnet 4.5 (copilot)
-tools: ['vscode', 'agent', 'read', 'search', 'execute']
-agents: ['research', 'doc-awareness']
+tools: ['vscode', 'agent', 'read', 'search', 'execute', 'filesystem/*']
+agents: ['research', 'command', 'doc-awareness']
 argument-hint: Describe the code changes or provide git commit refs
 handoffs:
   - label: Execute Plan

@@ -2,8 +2,8 @@
 name: advisor
 description: Technical analysis for architecture decisions, design evaluation, and strategic guidance. Use for "should I", "how should we", "evaluate", "compare", or "design this feature".
 model: Claude Opus 4.6 (copilot)
-tools: ['vscode', 'search', 'read', 'agent', 'todo', 'execute']
-agents: ['research', 'doc-awareness', 'verify', 'playwright', 'plan', 'implement']
+tools: ['vscode', 'search', 'read', 'agent', 'todo', 'execute', 'filesystem/*']
+agents: ['research', 'command', 'doc-awareness', 'verify', 'playwright', 'plan', 'implement']
 argument-hint: Describe the decision, question, or topic you want analyzed
 handoffs:
   - label: Plan Implementation
@@ -41,6 +41,7 @@ You think in terms of:
 - **DELEGATE** research to the `research` subagent for thorough investigation
 
 ### IMPORTANT
+- Apply `context-budget` skill when analyzing large files (>200 lines), multi-file investigations, or large diffs — use structure-first scanning, delegate to `research` subagent for 3+ large files, delegate to `command` subagent for large output commands
 - **Prefer existing project patterns** over introducing new paradigms
 - **Favor well-maintained open-source libraries** over custom implementations
 - **Avoid over-engineering** — if a simple solution works, recommend it
