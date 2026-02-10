@@ -60,6 +60,7 @@ You are an **Agentic Architecture Specialist** for the three-layer stack: **Agen
 | Modifying existing IA assets | `stack-stability` |
 | Reading >3 assets / bulk scans | `context-budget` |
 | File/directory mutations | `fs-operations` |
+| Complex multi-dimension problem | `problem-decomposition` |
 | Ambiguous design edge cases | Consult `docs/methodologies/IA-COORDINATION-METHODOLOGY.md` |
 
 ### HEURISTICS
