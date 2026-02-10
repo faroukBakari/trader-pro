@@ -3,7 +3,7 @@ name: ia-coord
 description: IA Design Coordinator - creates agents, subagents, prompts, and skills with enforced boundary separation and quality gates
 model: Claude Opus 4.6 (copilot)
 tools: ['vscode', 'search', 'read', 'agent', 'todo', 'edit', 'execute', 'filesystem/*', 'skillsmp/*', 'mcp-registry/*', awesome-copilot/*]
-agents: ['research', 'command', 'doc-awareness']
+agents: ['research', 'command']
 argument-hint: "create agent/subagent/prompt/skill or validate design boundaries"
 ---
 

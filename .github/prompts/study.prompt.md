@@ -44,7 +44,7 @@ Key considerations + Caveats
 ## Summary → Context → Codebase Analysis → Leverage Assessment → Solution Options → Risks → Implementation Sketch → Next Steps
 ```
 
-After delivering the study, **offer handoffs** to "Plan Implementation" or "Start Implementation" when actionable.
+After delivering the study, suggest **"Switch to builder mode to implement"** when actionable.
 
 ### Skills
 Apply these skills from `.github/skills/`: design-review, mode-interactive

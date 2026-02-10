@@ -766,11 +766,11 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
 ### Supported TradingView Features
 
 - **Charts**: Historical and real-time price charts
-- **Watchlist**: Live quotes for multiple symbols
+- **Watchlist**: Live quotes for multiple symbols (✅ enabled in widget configuration)
 - **Order Ticket**: Real-time pricing for order entry
 - **Buy/Sell Buttons**: Bid/ask price display
 - **Legend**: Last day change values (mobile compatible)
-- **Details Widget**: Market statistics and extended session data
+- **Details Widget**: Market statistics and extended session data (✅ enabled in widget configuration)
 
 ## API Services Usage
 

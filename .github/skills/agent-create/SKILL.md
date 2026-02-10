@@ -68,6 +68,13 @@ Include each property ONLY when the condition applies:
 | `web/fetch` | `fetch_webpage` | Web content retrieval |
 | `playwright/*` | `browser_click`, `browser_snapshot`, `browser_navigate`, etc. | Browser automation (Playwright MCP) |
 | `todo` | `manage_todo_list` | Progress tracking |
+| `context7/*` | `query-docs`, `resolve-library-id` | Versioned external library documentation |
+| `filesystem/*` | `fs_batch_operations`, `fs_search_files`, etc. | Workspace-confined filesystem ops |
+| `skillsmp/*` | `skillsmp_search`, `skillsmp_install_skill`, etc. | Skills marketplace |
+| `mcp-registry/*` | `list_servers_v0`, `get_server_version`, etc. | MCP server registry |
+| `awesome-copilot/*` | `search_instructions`, `load_instruction`, etc. | Community prompts/agents catalog |
+
+**⚠️ MCP toolset glob rule**: All MCP toolsets **MUST** use the `/*` glob suffix (e.g., `'context7/*'`, NOT `'context7'`). Bare toolset names without `/*` produce VS Code warnings and may not resolve correctly.
 
 **Least-privilege principle**: Start with the minimum tool set. Add tools only when the agent genuinely needs them.
 
@@ -102,10 +109,12 @@ Construct the YAML frontmatter systematically:
    ├── Read-only agent?                 → ['read', 'search']
    ├── + needs web fetch?               → add 'web/fetch'
    ├── + needs browser automation?      → add 'playwright/*'
+   ├── + needs external lib docs?       → add 'context7/*'
    ├── + writes code?                   → add 'edit'
    ├── + runs commands?                 → add 'bash'
    ├── + delegates?                     → add 'agent'
    └── + tracks progress?              → add 'todo'
+   ⚠️ MCP toolsets ALWAYS use '/*' suffix: 'context7/*', 'filesystem/*', never bare 'context7'
 
 5. DELEGATION (optional)
    ├── Spawns subagents?                → agents: ['name1', 'name2']
@@ -327,7 +336,7 @@ handoffs:
 | Analysis → Planning → Execution | study → plan → implement | New features, complex changes |
 | Planning → Execution → Validation | plan → implement → review | Planned work with quality gate |
 | Execution → Testing → Review | implement → test → review | Implementation-focused work |
-| Diagnosis → Fix → Verify | rca → implement → test | Bug fixing |
+| Diagnosis → Fix → Verify | implement (debug-hypothesis) → review | Bug fixing |
 
 ### Handoff Anti-Patterns
 
