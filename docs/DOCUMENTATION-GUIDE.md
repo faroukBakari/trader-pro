@@ -151,16 +151,17 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### .github/agents/ (Custom Agent Definitions)
 
-| File                                          | Purpose                                                    |
-| --------------------------------------------- | ---------------------------------------------------------- |
-| **.github/agents/ia-coord.agent.md**          | ⭐ Master IA coordinator - creates agents, prompts, skills |
-| **.github/agents/study.agent.md**             | Solutions architect - research and planning                |
-| **.github/agents/plan.agent.md**              | Planning agent with handoff to implement                   |
-| **.github/agents/implement.agent.md**         | Implementation agent with handoff to review                |
-| **.github/agents/review.agent.md**            | Code review specialist                                     |
-| **.github/agents/backend-test.agent.md**      | Backend testing specialist (Python/pytest)                 |
-| **.github/agents/research.sub.agent.md**      | Hidden subagent for read-only research                     |
-| **.github/agents/doc-awareness.sub.agent.md** | Hidden subagent for documentation context discovery        |
+| File                                       | Purpose                                                    |
+| ------------------------------------------ | ---------------------------------------------------------- |
+| **.github/agents/ia-coord.agent.md**       | ⭐ Master IA coordinator - creates agents, prompts, skills |
+| **.github/agents/advisor.agent.md**        | Analysis, design, code review - read-only (Opus)           |
+| **.github/agents/builder.agent.md**        | Build orchestrator - plan + implement + test (Opus)        |
+| **.github/agents/implement.sub.agent.md**  | Code execution subagent (Sonnet, builder only)             |
+| **.github/agents/doc-update.sub.agent.md** | Documentation update subagent (Sonnet, builder only)       |
+| **.github/agents/research.sub.agent.md**   | Subagent for read-only research                            |
+| **.github/agents/verify.sub.agent.md**     | Subagent for multi-file verification                       |
+| **.github/agents/command.sub.agent.md**    | Subagent for large-output terminal execution               |
+| **.github/agents/playwright.sub.agent.md** | Subagent for browser automation                            |
 
 ---
 
@@ -364,7 +365,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
 | **"Custom agents/agent.md/subagents"**             | **`methodologies/IA-COORDINATION-METHODOLOGY.md` → `.github/agents/` (implementations) → `.github/copilot-instructions.md`**                                                                                                                                                   | **Methodology first**  |
 | **"Create agent/agent prompt/agent workflow"**     | **`methodologies/IA-COORDINATION-METHODOLOGY.md` (Three-Layer Model, Quality Gates) → `.github/agents/ia-coord.agent.md` (coordinator)**                                                                                                                                       | **Methodology first**  |
-| **"Handoffs/agent orchestration/runSubagent"**     | **`methodologies/IA-COORDINATION-METHODOLOGY.md` (Workflow, Delegation) → `.github/agents/plan.agent.md` (handoff example)**                                                                                                                                                   | **Methodology first**  |
+| **"Handoffs/agent orchestration/runSubagent"**     | **`methodologies/IA-COORDINATION-METHODOLOGY.md` (Workflow, Delegation) → `.github/agents/builder.agent.md` (orchestration example)**                                                                                                                                          | **Methodology first**  |
 | "How do I set up..."                               | `GETTING-STARTED.md` → `DEVELOPMENT.md`                                                                                                                                                                                                                                        | Sequential             |
 | "How does [feature] work"                          | `ARCHITECTURE.md` → topic-specific docs                                                                                                                                                                                                                                        | Architecture first     |
 | "Implement [backend feature]"                      | `MODULAR_BACKEND_ARCHITECTURE.md` → `API-METHODOLOGY.md` → module docs                                                                                                                                                                                                         | Sequential             |

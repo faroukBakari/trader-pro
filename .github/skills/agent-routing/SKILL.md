@@ -11,28 +11,24 @@ Use this skill to (1) identify when to delegate work to specialist agents, and (
 
 ## Agent & Subagent Catalog
 
-### User-Facing Agents (handoff targets)
+### User-Facing Agents
 
 | Agent | Specialty | Best For | Model |
 |-------|-----------|----------|-------|
-| `backend-test` | Test creation & coverage | Writing tests, coverage analysis, pytest patterns | Sonnet |
-| `review` | Quality analysis | Code review, security audit, pattern compliance | Sonnet |
-| `plan` | Structured planning | Multi-step features, validated implementation plans | Opus |
-| `advisor` | Architecture & consultation | Design tradeoffs, technology selection, read-only advice, explanations | Opus |
-| `implement` | Code execution | Writing code, running tests, making changes, plan execution | Sonnet |
-| `rca` | Root cause analysis | Hypothesis-driven debugging | Opus |
-| `doc-update` | Doc update planning | Documentation refresh after code changes | Sonnet |
-| `type-fix` | Type error resolution | Fix mypy/pyright/vue-tsc failures systematically | Sonnet |
+| `advisor` | Analysis & consultation | Design tradeoffs, code review, architecture, debugging, read-only advice | Opus |
+| `builder` | Build orchestration | Plan + implement + test + document lifecycle, feature builds, fixes | Opus |
 | `ia-coord` | Agentic design | Create agents/subagents/prompts/skills | Opus |
 
 ### Subagents (invoked via `runSubagent`)
 
-| Subagent | Specialty | Model | Key Capability |
+| Subagent | Parent(s) | Model | Key Capability |
 |----------|-----------|-------|----------------|
-| `research` | Information gathering | Haiku | Codebase search, web fetch, synthesis |
-| `extract` | File analysis | Haiku | Targeted extraction or holistic digest |
-| `doc-awareness` | Doc discovery | Haiku | Index-driven doc finding + insight extraction |
-| `command` | Terminal execution | Haiku | Large-output commands, parallel runs, daemon mgmt |
+| `research` | advisor, builder | Haiku | Codebase search, web fetch, synthesis |
+| `command` | advisor, builder | Haiku | Large-output commands, parallel runs, daemon mgmt |
+| `verify` | advisor, builder | Haiku | Multi-file verification with pass/fail verdicts |
+| `playwright` | advisor, builder | Haiku | Browser automation for UI inspection |
+| `implement` | builder | Sonnet | Low-level code execution per task |
+| `doc-update` | builder | Sonnet | Documentation updates with gap analysis |
 
 ---
 
@@ -48,22 +44,23 @@ Use this skill to (1) identify when to delegate work to specialist agents, and (
 │     NO  → Consider delegation                                   │
 │                                                                 │
 │  2. Do I need information I don't have?                         │
-│     YES → Delegate to `research` or `extract` subagent          │
+│     YES → Delegate to `research` subagent                       │
 │     NO  → Continue                                              │
 │                                                                 │
 │  3. Do I need documentation context?                            │
-│     YES → Delegate to `doc-awareness` subagent                  │
+│     YES → Delegate to `research` subagent (start from           │
+│           docs/DOCUMENTATION-GUIDE.md)                          │
 │     NO  → Continue                                              │
 │                                                                 │
-│  4. Is this a specialized domain?                               │
-│     Tests/coverage → `backend-test` agent                       │
-│     Security/quality → `review` agent                           │
-│     Architecture → `advisor` agent                              │
+│  4. What kind of work is it?                                    │
+│     Analysis/review/design → `advisor` agent                    │
+│     Code changes/builds/tests → `builder` agent                 │
+│     IA stack artifacts → `ia-coord` mode                        │
 │     Complex commands → `command` subagent                       │
-│     NO  → Continue inline                                       │
+│     None of above → Continue inline                             │
 │                                                                 │
-│  5. Will output benefit from structured review?                 │
-│     YES → Offer `review` handoff after completion               │
+│  5. Does this need multi-file verification?                     │
+│     YES → Spawn `verify` subagent                               │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -76,35 +73,37 @@ Use this skill to (1) identify when to delegate work to specialist agents, and (
 
 | User Request Contains | Likely Best Agent | Action |
 |-----------------------|-------------------|--------|
-| "research", "find out", "investigate", "what does X do" | `research` | Delegate for context gathering |
-| "test", "coverage", "add tests", "spec" | `backend-test` | Delegate for test work |
-| "review", "check", "audit", "is this correct" | `review` | Delegate or offer handoff |
-| "plan", "design", "how should we", "approach" | `plan` or `advisor` | Delegate for structured planning |
-| "refactor", "improve architecture", "evaluate options" | `advisor` | Delegate for analysis |
-| "implement", "build", "create", "fix" | `implement` | Execute directly or delegate |
-| "debug", "why", "investigate failure", "root cause" | `rca` | Delegate for hypothesis-driven debugging |
-| "explain", "how does X work" | `advisor` | Delegate for read-only consultation |
+| "research", "find out", "investigate", "what does X do" | `research` subagent | Delegate for context gathering |
+| "review", "check", "audit", "is this correct" | `advisor` | Apply `code-review` skill + spawn `verify` |
+| "design", "how should we", "approach", "evaluate" | `advisor` | Apply `design-review` skill |
+| "explain", "how does X work", "compare" | `advisor` | Read-only consultation |
+| "debug", "why", "root cause" | `advisor` | Apply `debug-hypothesis` skill |
+| "build", "implement", "create", "fix" | `builder` | Plan + orchestrate implement |
+| "test", "coverage", "add tests", "spec" | `builder` | Apply `backend-testing`/`frontend-testing` skill |
+| "plan", "refactor" | `builder` | Dynamic planning + execution |
+| "update docs", "document changes" | `builder` | Spawn `doc-update` subagent |
+| "fix types", "type error" | `builder` | Implement applies `fix-type-errors` skill |
 
 ### Complexity Triggers
 
 | Situation | Recommended Action |
 |-----------|-------------------|
-| Multi-file feature implementation | Create `plan` first, then `implement` |
-| Unfamiliar codebase area | Use `research` subagent before acting |
-| Need doc context for implementation | Use `doc-awareness` subagent before acting |
-| Post-implementation validation | Offer `review` handoff |
-| New test suite needed | Delegate to `backend-test` agent |
-| Architecture decision required | Use `advisor` agent for analysis |
-| Large-output or parallel commands | Use `command` subagent |
+| Multi-file feature implementation | `builder` (plans + orchestrates implement subagent) |
+| Unfamiliar codebase area | `research` subagent before acting |
+| Need doc context | `research` subagent (start from DOCUMENTATION-GUIDE.md) |
+| Code quality check needed | `advisor` (apply `code-review` skill + spawn `verify`) |
+| Architecture decision required | `advisor` (apply `design-review` skill) |
+| Large-output or parallel commands | `command` subagent |
+| Type errors failing CI | `builder` (implement applies `fix-type-errors` skill) |
 
 ---
 
-## Subagent vs Handoff
+## Subagent Delegation
 
 | Mechanism | When to Use | User Visibility |
-|-----------|-------------|-----------------|
-| **Subagent** (`runSubagent`) | Background research, intermediate steps, batch edits | Low — results flow back silently |
-| **Handoff** (manual) | Major phase transitions, user choice needed | High — explicit user action |
+|-----------|-------------|------------------|
+| **Subagent** (`runSubagent`) | Background research, intermediate steps, code execution, verification | Low — results flow back silently |
+| **Mode switch** (text suggestion) | Different persona needed (advisor ↔ builder) | High — user switches agent mode |
 
 ---
 
@@ -194,47 +193,6 @@ I will use your findings to [implement feature X / decide between approaches / w
 
 **Bad example**: "Research WebSocket stuff" — No scope, no background, no output spec, no usage intent.
 
-### `extract` — File Analysis
-
-**Extract mode** (specific data points):
-```
-Analyze [target files/pattern] to find:
-- [Specific question 1]
-- [Specific question 2]
-
-Scope: [exact files or directory patterns]
-Background: [why these data points matter]
-Prior knowledge: [relevant context from earlier steps]
-
-Output: Summary answer + per-file findings with line citations.
-I will use your findings to [specific downstream action].
-```
-
-**Digest mode** (holistic summary):
-```
-Digest [target file/module/directory] for [stated purpose]:
-- Focus on: [aspects that matter]
-- Ignore: [aspects to skip]
-
-Background: [what I'm trying to accomplish]
-
-Output: Compressed module overview covering purpose, key components, dependencies, and patterns.
-I will use this digest to [orient myself / plan implementation / write documentation].
-```
-
-### `doc-awareness` — Documentation Discovery
-
-```
-Context: [what you're working on — task, feature, module, problem area]
-Background: [why documentation context is needed — 1-2 sentences]
-Prior knowledge: [docs already consulted, so the subagent doesn't re-read them]
-
-Output: [what kind of documentation insight you need — patterns, conventions, step-by-step guidance, constraints]
-I will use your findings to [implement correctly / follow project conventions / understand constraints].
-```
-
-**Good example**: "Context: Adding a new REST endpoint to the broker module (`GET /positions`). Background: This endpoint needs auth, versioning, and OpenAPI spec generation. Prior knowledge: We've already read the module's existing `api/v1.py` and understand the router pattern. Output: Versioning conventions, OpenAPI spec generation flow, and authentication middleware wiring — focus on what we haven't seen in `api/v1.py`. I will use your findings to ensure the endpoint follows all project conventions."
-
 ### `command` — Terminal Execution
 
 ```
@@ -270,9 +228,10 @@ BEFORE INVOKING: {subagent_name}
 │
 ├── 3. RIGHT SUBAGENT?
 │   ├── Read-only codebase search → research
-│   ├── File-specific data points or module digest → extract
-│   ├── Documentation guidance → doc-awareness
-│   └── Complex/large-output terminal commands → command
+│   ├── Documentation guidance → research (start from DOCUMENTATION-GUIDE.md)
+│   ├── Complex/large-output terminal commands → command
+│   ├── Multi-file checks with verdicts → verify
+│   └── Code execution (builder only) → implement
 │
 └── 4. WORTH DELEGATING?
     ├── Is this >10 steps or requires isolated exploration? → YES, delegate
@@ -301,8 +260,11 @@ BEFORE INVOKING: {subagent_name}
 | Skill | Agent Routing Intersection |
 |-------|---------------------------|
 | `mode-interactive` | Use when agent choice is ambiguous — ask user |
-| `plan-implement` | Plan agent produces input for implement agent |
-| `design-review` | Advisor agent uses design-review skill internally |
-| `debug-hypothesis` | May trigger research subagent for hypothesis validation |
-| `request-evaluation` | Apply inline for request gap analysis — all agents handle directly |
+| `plan-implement` | Builder uses for implementation planning methodology |
+| `design-review` | Advisor applies for architecture/design analysis |
+| `code-review` | Advisor applies for post-implementation code review |
+| `debug-hypothesis` | Advisor applies; may trigger research subagent |
+| `request-evaluation` | Both agents apply for request gap analysis |
 | `terminal-usage` | Applied by command subagent — don't re-apply when delegating |
+| `backend-testing` | Builder orchestrates; implement applies pytest patterns |
+| `frontend-testing` | Builder orchestrates; implement applies Vitest patterns |
