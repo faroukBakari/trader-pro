@@ -282,6 +282,33 @@ class TestPlaceOrder:
         assert order.action == "SELL"
         assert order.auxPrice == 140.00
 
+    @pytest.mark.asyncio
+    async def test_market_order_no_limit_price(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Market orders should not expose limitPrice even if TWS sets lmtPrice."""
+        # Create a tracked order with market type but lmtPrice set
+        # (TWS internally sets this field even for market orders)
+        market_order = _create_mock_order(
+            order_type="MKT",
+            lmt_price=322.88,  # TWS internally sets this
+        )
+        tracked = _create_tracked_order(order_id=1, order=market_order)
+
+        # Mock the provider to return this tracked order
+        contract_details = _create_mock_contract_details()
+        mock_client.reqContractDetails = AsyncMock(return_value=contract_details)
+        mock_client.reqOpenOrders = AsyncMock(return_value=[tracked])
+
+        # Retrieve and verify conversion
+        orders = await provider.get_orders()
+        assert len(orders) == 1
+        placed = orders[0]
+
+        assert placed.limitPrice is None
+        assert placed.stopPrice is None
+        assert placed.type == OrderType.MARKET
+
 
 class TestPlaceOrderWithBrackets:
     """Test TWSBrokerProvider.place_order() with bracket orders."""

@@ -897,6 +897,12 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
           formatter: StandardFormatterName.Side,
         },
         {
+          label: 'Type',
+          id: 'type',
+          dataFields: ['type', 'parentId', 'stopType'],
+          formatter: StandardFormatterName.Type,
+        },
+        {
           label: 'Quantity',
           id: 'qty',
           dataFields: ['qty'],
