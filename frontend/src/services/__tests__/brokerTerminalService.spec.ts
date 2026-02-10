@@ -546,6 +546,7 @@ describe('BrokerTerminalService', () => {
       expect(accountInfo.orderColumns.length).toBeGreaterThan(0)
       expect(accountInfo.orderColumns.some((col) => col.id === 'symbol')).toBe(true)
       expect(accountInfo.orderColumns.some((col) => col.id === 'side')).toBe(true)
+      expect(accountInfo.orderColumns.some((col) => col.id === 'type')).toBe(true)
       expect(accountInfo.orderColumns.some((col) => col.id === 'qty')).toBe(true)
       expect(accountInfo.orderColumns.some((col) => col.id === 'status')).toBe(true)
     })

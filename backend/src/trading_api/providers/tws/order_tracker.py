@@ -324,13 +324,19 @@ class TrackedOrder:
         # Status with history-aware resolution
         status = self.domain_status
 
-        # Prices
+        # Prices — order-type-aware extraction
+        # TWS may set lmtPrice/auxPrice internally even for order types that
+        # don't use them (e.g. market orders). Only expose prices relevant
+        # to the order type to avoid misleading the UI.
         limit_price: float | None = None
         stop_price: float | None = None
-        if order.lmtPrice and order.lmtPrice > 0:
-            limit_price = order.lmtPrice
-        if order.auxPrice and order.auxPrice > 0:
-            stop_price = order.auxPrice
+        if order_type == OrderType.LIMIT:
+            if order.lmtPrice and order.lmtPrice > 0:
+                limit_price = order.lmtPrice
+        elif order_type in (OrderType.STOP, OrderType.TRAIL):
+            if order.auxPrice and order.auxPrice > 0:
+                stop_price = order.auxPrice
+        # MARKET orders: no prices exposed
 
         # Filled quantity from order object (mutated by orderStatus callback)
         filled_qty = (
