@@ -309,39 +309,35 @@ Before complex tasks, consider whether a specialist agent could achieve better r
 | Agent | Use For | Trigger Keywords |
 |-------|---------|------------------|
 | `ia-coord` | Create agents/subagents/prompts/skills with enforced boundary separation | "create agent", "create subagent", "create prompt", "create skill", "validate design" |
-| `backend-test` | Backend test creation, pytest patterns, coverage analysis | "test", "coverage", "add tests", "backend test" |
-| `frontend-test` | Frontend test creation, Vitest patterns, coverage analysis | "frontend test", "component test", "vue test", "vitest" |
-| `review` | Code quality, security audit → handoffs to `implement` | "review", "check", "audit" |
-| `plan` | Multi-step implementation planning → handoffs to `implement` | "plan", "how should we" |
-| `advisor` | Architecture decisions, design evaluation, technical consultation → handoffs to `plan`, `implement` | "evaluate", "compare", "refactor strategy", "explain", "how does X work", "should I" |
-| `implement` | Implementation engineer — freeform coding or plan execution with validation → handoffs to `review` | "implement", "build", "fix", "follow plan", "execute plan" |
-| `rca` | Root cause analysis, hypothesis-driven debugging → handoffs to `implement`, `plan` | "debug", "why", "investigate failure" |
-| `doc-update` | Documentation update planning → handoffs to `implement` | "update docs", "doc drift", "document changes" |
-| `type-fix` | Fix type errors systematically → handoffs to `review` | "fix types", "type error", "mypy/pyright fail" |
-| `doc-awareness` | Documentation context discovery and extraction (subagent) | Delegated for doc-aware task context, documentation guidance |
-| `research` | High-fidelity information gathering with adaptive depth (subagent) | Delegated for context discovery, cross-file synthesis, relevance-filtered research |
-| `command` | Large-output command execution, parallel runs, daemon management (subagent) | Delegated for env-aware terminal execution with full output capture and cleanup |
-| `verify` | Multi-file verification with pass/fail verdicts (subagent) | Delegated for mid-complexity checks, multi-file validation, and command-based verification with structured verdict reports |
-| `playwright` | Browser automation via Playwright MCP (subagent) | Delegated for UI inspection, interaction, debugging, and visual verification with lean result extraction |
+| `advisor` | Analysis, review, study, design, architecture, debugging — read-only, never edits | "review", "evaluate", "compare", "explain", "should I", "debug", "study" |
+| `builder` | Build orchestrator — plan + implement + test + document (full lifecycle) | "build", "implement", "fix", "add tests", "update docs", "plan", "refactor" |
+
+**Subagents (not user-invokable):**
+
+| Subagent | Parent(s) | Purpose |
+|----------|-----------|---------|
+| `research` | advisor, builder | Information gathering with adaptive depth |
+| `command` | advisor, builder | Large-output terminal execution with full capture |
+| `verify` | advisor, builder | Multi-file verification with pass/fail verdicts |
+| `playwright` | advisor, builder | Browser automation for UI inspection and verification |
+| `implement` | builder | Low-level code execution (Sonnet) |
+| `doc-update` | builder | Documentation updates with gap analysis (Sonnet) |
 
 ### Quick Decision Rules
 
-1. **Creating agents/prompts/skills?** → `ia-coord` agent (enforces three-layer model)
-2. **Creating a subagent?** → `ia-coord` agent (uses `templates/subagent-template.md`, enforces SA-1–SA-7)
-3. **Need context you don't have?** → `research` subagent first
-4. **Multi-file feature?** → `plan` → `implement` → `review` (full workflow chain)
-5. **Writing backend tests?** → `backend-test` → `review` handoff
-6. **Writing frontend tests?** → `frontend-test` → `review` handoff
-7. **Large change complete?** → handoff to `review` (built into `implement`, test agents)
-8. **Architecture question?** → `advisor` → `plan` or `implement` handoff
-9. **Have a plan to execute?** → `implement` agent (plan execution mode) → `review` handoff
-10. **Debugging complex issue?** → `rca` → `implement` or `plan` handoff
-11. **Documentation needs update?** → `doc-update` → `implement` handoff, or `/doc-assess` prompt (audit)
-12. **Type errors failing CI?** → `type-fix` → `review` handoff
-13. **Need documentation context for a task?** → `doc-awareness` subagent
-14. **Ambiguous or complex user request?** → Apply `request-evaluation` skill inline, then `mode-interactive` for critical gaps
-15. **Large output or parallel commands?** → `command` subagent for isolated terminal execution with full capture
-16. **Need multi-file verification with verdicts?** → `verify` subagent for structured pass/fail checks across files and commands
-17. **Need browser/UI inspection or interaction?** → `playwright` subagent for isolated browser automation with lean results
-18. **Review found issues?** → `review` → `implement` handoff to fix them
+1. **Creating IA stack artifacts?** → `ia-coord` (enforces three-layer model)
+2. **Architecture/design question?** → `advisor` (apply `design-review` skill)
+3. **"Review this" / code quality?** → `advisor` (apply `code-review` skill + spawn `verify`)
+4. **Multi-file feature?** → `builder` (plans + orchestrates implement)
+5. **Writing tests?** → `builder` (apply `backend-testing`/`frontend-testing` skill)
+6. **Quick single-file fix?** → `builder` (lightweight plan + implement)
+7. **Type errors failing CI?** → `builder` (implement applies `fix-type-errors` skill)
+8. **Documentation update?** → `builder` (spawns doc-update subagent)
+9. **Need context/research?** → `advisor` (spawns `research` subagent)
+10. **Debugging complex issue?** → `advisor` (apply `debug-hypothesis` skill)
+11. **Ambiguous request?** → `advisor` (apply `request-evaluation` + `mode-interactive`)
+12. **Need documentation context?** → `research` subagent (start from `docs/DOCUMENTATION-GUIDE.md`)
+13. **Large output or parallel commands?** → `command` subagent for isolated terminal execution
+14. **Need multi-file verification?** → `verify` subagent for structured pass/fail checks
+15. **Need browser/UI inspection?** → `playwright` subagent for browser automation
 

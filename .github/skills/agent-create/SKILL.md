@@ -327,7 +327,7 @@ handoffs:
 | Analysis → Planning → Execution | study → plan → implement | New features, complex changes |
 | Planning → Execution → Validation | plan → implement → review | Planned work with quality gate |
 | Execution → Testing → Review | implement → test → review | Implementation-focused work |
-| Diagnosis → Fix → Verify | rca → implement → test | Bug fixing |
+| Diagnosis → Fix → Verify | implement (debug-hypothesis) → review | Bug fixing |
 
 ### Handoff Anti-Patterns
 

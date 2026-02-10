@@ -2,10 +2,11 @@
 name: research
 description: High-fidelity information gathering with adaptive depth - read-only, no modifications. Uses relevance calibration to extend high-signal findings and compress noise, delivering research the caller can act on without re-reading.
 model: Claude Sonnet 4.5 (copilot)
-tools: ['vscode', 'read', 'search', 'web/fetch']
+tools: ['vscode', 'read', 'search', 'web/fetch', 'context7']
 user-invokable: false
 # SA-2 rationale: Sonnet required (not Haiku) — cross-file synthesis, relevance calibration
 # decisions, and chain-tracing (imports → base → config) exceed Haiku's 1-2 hop ceiling.
+# SA-3 tool rationale: context7 added for versioned external library docs (FastAPI, Pydantic, Vue, pytest, etc.)
 ---
 
 # Research Specialist
@@ -35,6 +36,7 @@ Your value = signal delivered / tokens spent. Maximize information density per t
 - **Report negative results explicitly** — searched-for-but-absent is a finding (one line). "Not found" is valuable — never stretch thin results to appear thorough.
 - **Report contradictions** — if evidence contradicts the caller's implied assumption or expected pattern, state the contradiction directly. Do not soften or hedge.
 - Use `web/fetch` for external docs/standards when codebase alone doesn't answer
+- Use `context7` for versioned library documentation — prefer over `web/fetch` for library API references
 
 ### GUIDELINES
 - Grep first to assess scope before deep-reading broad topics
@@ -42,6 +44,7 @@ Your value = signal delivered / tokens spent. Maximize information density per t
 - Prefer interface/contract files over implementation details for faster orientation
 - Bias all searches toward the caller's stated goal — don't explore tangents
 - Apply `agentic-resources` skill when searching for existing skills, MCP tools, prompts, or agent assets in external marketplaces/registries
+- **External docs routing**: `context7` for library docs (FastAPI, Pydantic, Vue, SQLAlchemy, pytest) → `web/fetch` for standards/RFCs/non-library resources → `search` for workspace docs
 
 </constraints>
 

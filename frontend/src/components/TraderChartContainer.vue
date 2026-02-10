@@ -157,7 +157,7 @@ onMounted(() => {
       locale: getLanguageFromURL() || 'en',
       theme: 'dark',
       enabled_features: ['pre_post_market_sessions'], // Extended sessions support
-      disabled_features: ['study_templates', 'adaptive_logo'], // , 'use_localstorage_for_settings'
+      disabled_features: ['study_templates', 'adaptive_logo', 'show_object_tree'], // , 'use_localstorage_for_settings'
 
       // System color scheme overrides
       // need to clear site data on the browser to see the effect after changing these values
@@ -180,6 +180,29 @@ onMounted(() => {
       // user_id: props.userId,
       fullscreen: props.fullscreen,
       autosize: props.autosize,
+
+      // Watchlist widget panel (right sidebar)
+      widgetbar: {
+        watchlist: true,
+        watchlist_settings: {
+          default_symbols: [
+            '###US Tech',
+            'NASDAQ:AAPL',
+            'NASDAQ:GOOGL',
+            'NASDAQ:MSFT',
+            'NASDAQ:AMZN',
+            'NASDAQ:TSLA',
+            '###Indices',
+            'CBOE:SPX',
+            'DJ:DJI',
+            'NASDAQ:NDX',
+          ],
+          readonly: false,
+        },
+        details: true,
+        news: false,
+      },
+
       studies_overrides: props.studiesOverrides,
 
       debug: false,
