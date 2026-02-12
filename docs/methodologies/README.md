@@ -18,7 +18,7 @@ Our implementation methodologies provide step-by-step templates for adding new f
 
 ### Custom Agent Development
 
-**File**: [AGENT-MD-METHODOLOGY.md](AGENT-MD-METHODOLOGY.md)
+**File**: [IA-COORDINATION-METHODOLOGY.md](IA-COORDINATION-METHODOLOGY.md)
 
 **Purpose**: Comprehensive guide for creating VS Code custom agents (`.agent.md` files) optimized for Claude models
 

@@ -827,6 +827,7 @@ The broker's capabilities are defined via `broker_config.configFlags`:
 | `supportPositions`             | ✅ Enabled  | Show position panel               |
 | `supportOrderPreview`          | ✅ Enabled  | Preview orders before placement   |
 | `supportPositionBrackets`      | ✅ Enabled  | Edit SL/TP for positions          |
+| `supportOrderBrackets`         | ✅ Enabled  | Edit SL/TP for order brackets     |
 | `supportLeverage`              | ✅ Enabled  | Leverage management               |
 | `showQuantityInsteadOfAmount`  | ❌ Disabled | Show quantity vs. monetary amount |
 | `supportLevel2Data`            | ❌ Disabled | No DOM/Level 2 data               |
@@ -848,6 +849,7 @@ The broker's capabilities are defined via `broker_config.configFlags`:
 - ✅ **Order Types**: Market, Limit, Stop, Stop-Limit
 - ✅ **Order Sides**: Buy and Sell
 - ✅ **Backend Integration**: Full REST API communication
+- ✅ **Bracket Orders**: Stop-loss and take-profit attached to orders (bracket grouping + enrichment)
 
 #### Position Management
 
@@ -922,7 +924,6 @@ The broker's capabilities are defined via `broker_config.configFlags`:
 
 #### Advanced Order Types
 
-- ❌ **Bracket Orders**: Stop-loss and take-profit attached to orders
 - ❌ **Trailing Stops**: Dynamic stop-loss updates
 - ❌ **OCO Orders**: One-cancels-other order pairs
 
@@ -1008,12 +1009,14 @@ async accountsMetainfo(): Promise<AccountMetainfo[]> {
 The "Trades" custom page displays execution history with commission data in a dedicated Account Manager tab.
 
 **Implementation Pattern**:
+
 - **Tab Counter**: `displayCounterInTab: true` shows execution count (e.g., "Trades 5") similar to Orders/Positions tabs
 - **Data Source**: `getData()` calls `getAllExecutions()` REST endpoint (SSOT pattern - no local cache)
 - **Real-Time Updates**: `changeDelegate` receives WebSocket execution updates via `this._executionChangeDelegate.fire(execution)`
 - **TWS Two-Phase Dispatch**: Table receives TWO updates per execution (immediate fill + commission enrichment ~50-200ms later). TradingView uses `execution.id` for row deduplication, so second fire updates the commission column.
 
 **Delegates**:
+
 ```typescript
 // Initialize in constructor
 this._executionChangeDelegate = this._hostAdapter.factory.createDelegate()
@@ -1023,10 +1026,10 @@ this._executionDeleteDelegate = this._hostAdapter.factory.createDelegate()
 this.executionsClient.subscribe(
   { accountId: this.accountId },
   (execution: Execution) => {
-    this._executionChangeDelegate.fire(execution)  // Updates table row
-    this._hostAdapter.executionUpdate(execution)   // Chart markers
+    this._executionChangeDelegate.fire(execution) // Updates table row
+    this._hostAdapter.executionUpdate(execution) // Chart markers
   },
-  (error) => this.handleSubscriptionError('Executions', error)
+  (error) => this.handleSubscriptionError('Executions', error),
 )
 ```
 
@@ -1227,11 +1230,13 @@ Returns execution history for a specific symbol.
 Returns ALL execution history across all symbols (no filter).
 
 **Usage**:
+
 - Called by custom "Trades" page `getData()` function
 - Backend returns all executions from ExecutionTracker
 - Each execution has unique `id` field for TradingView table deduplication
 
 **Implementation**:
+
 ```typescript
 async getAllExecutions(): ApiPromise<Execution[]> {
   const response = await this.brokerApi.getAllExecutions()
