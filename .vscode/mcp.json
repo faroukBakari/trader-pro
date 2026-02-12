@@ -56,13 +56,29 @@
 				"@upstash/context7-mcp@latest"
 			]
 		},
-
+		"tavily": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"-y",
+				"tavily-mcp@latest"
+			],
+			"env": {
+				"TAVILY_API_KEY": "${input:tavilyApiKey}"
+			}
+		}
 	},
 	"inputs": [
 		{
 			"id": "skillsmpApiKey",
 			"type": "promptString",
 			"description": "SkillsMP API Key (from https://skillsmp.com)",
+			"password": true
+		},
+		{
+			"id": "tavilyApiKey",
+			"type": "promptString",
+			"description": "Tavily API Key (from https://tavily.com)",
 			"password": true
 		}
 	]

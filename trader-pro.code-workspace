@@ -116,7 +116,12 @@
 
     // Terminal
     "terminal.integrated.cwd": ".",
-    "makefile.configureOnOpen": false
+    "makefile.configureOnOpen": false,
+    "github.copilot.enable": {
+      "*": false
+    },
+    "github.copilot.nextEditSuggestions.enabled": false,
+    "claudeCode.useTerminal": true
   },
   "extensions": {
     "recommendations": [

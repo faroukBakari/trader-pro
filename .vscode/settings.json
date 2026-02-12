@@ -6,7 +6,8 @@
         "editor.formatOnSave": false
     },
     "files.associations": {
-        ".github/skills/**/SKILL.md": "markdown"
+        ".github/skills/**/SKILL.md": "markdown",
+        ".claude/skills/**/SKILL.md": "plaintext"
     },
     "python-envs.pythonProjects": [
         {
@@ -36,4 +37,5 @@
         "black"
     ],
     "python.defaultInterpreterPath": "/home/farouk/trader-pro/backend/.venv/bin/python",
+    "github.copilot.nextEditSuggestions.enabled": false,
 }
