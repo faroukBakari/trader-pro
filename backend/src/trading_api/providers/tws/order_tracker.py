@@ -8,7 +8,6 @@ directly. Domain conversion happens at broker_provider level via tws_mappers.
 import asyncio
 import logging
 import os
-import re
 import threading
 import time
 import uuid
@@ -38,10 +37,15 @@ from trading_api.models.broker import (
     ParentType,
     PlacedOrder,
     Side,
-    StopType,
 )
 from trading_api.models.exceptions import ProviderException
-from trading_api.providers.tws.tws_mappers import ticker_name
+from trading_api.providers.tws.tws_mappers import (
+    ORDER_BRACKET_PATTERN,
+    TWS_ACTION_TO_SIDE,
+    TWS_TO_ORDER_TYPE,
+    isUnset,
+    ticker_name,
+)
 from trading_api.providers.tws.wiring_interfaces import (
     IbSocketWiringInterface,
     OrderTrackerCBWiringInterface,
@@ -66,66 +70,6 @@ _HISTORY_RESOLVED_STATUS: set[str] = {
     "PendingSubmit",  # Sent, awaiting exchange ack - use last confirmed
     "ApiPending",  # Not yet sent to IB server - use last confirmed
 }
-
-ORDER_BRACKET_PATTERN = re.compile(r"^brackets_(\d+)$")
-
-# Domain OrderType → TWS orderType string
-ORDER_TYPE_TO_TWS: dict[int, str] = {
-    1: "LMT",  # LIMIT
-    2: "MKT",  # MARKET
-    3: "STP",  # STOP
-    4: "TRAIL",  # TRAIL
-}
-
-# TWS orderType string → Domain OrderType
-TWS_TO_ORDER_TYPE: dict[str, int] = {
-    "LMT": 1,  # LIMIT
-    "MKT": 2,  # MARKET
-    "STP": 3,  # STOP
-    "TRAIL": 4,  # Alias
-}
-
-# Domain Side → TWS action string
-SIDE_TO_TWS_ACTION: dict[int, str] = {
-    1: "BUY",  # Side.BUY
-    -1: "SELL",  # Side.SELL
-}
-
-# TWS action → Domain Side
-TWS_ACTION_TO_SIDE: dict[str, int] = {
-    "BUY": 1,
-    "SELL": -1,
-    "BOT": 1,  # Historical action
-    "SLD": -1,  # Historical action
-}
-
-
-def isUnset(value: Any) -> bool:
-    """Check if a TWS value is considered 'unset' (default/placeholder)."""
-    if value is None:
-        return True
-    if isinstance(value, (int, float)) and value == UNSET_DOUBLE:
-        return True
-    if isinstance(value, Decimal) and value == UNSET_DECIMAL:
-        return True
-    if isinstance(value, str) and value == "":
-        return True
-    return False
-
-
-@dataclass
-class BracketContext:
-    """Context for bracket order information.
-
-    Preserves original PreOrder bracket fields for PlacedOrder reconstruction.
-    TWS doesn't return bracket prices in order callbacks, so we track them here.
-    """
-
-    take_profit: float | None = None
-    stop_loss: float | None = None
-    trailing_stop_pips: float | None = None
-    stop_type: int | None = None
-    child_order_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -169,7 +113,6 @@ class TrackedOrder:
     order: Order
     orderState: OrderState
     fills: list[OrderFill] = field(default_factory=list)
-    parent_filled: bool = False
 
     @property
     def domain_status(self) -> OrderStatus:
@@ -177,9 +120,6 @@ class TrackedOrder:
         Handles cancel transitions (PendingCancel, ApiCancelled) by preserving
         the last confirmed status from order history. This prevents misleading
         users during market halts where orders might still fill after cancel request.
-
-        Args:
-            tracked: TrackedOrder with current status and fills history
 
         Returns:
             Domain OrderStatus enum value
@@ -288,18 +228,17 @@ class TrackedOrder:
         self,
         *,
         contract: Contract | None = None,
-        bracket_context: BracketContext | None = None,
     ) -> PlacedOrder:
         """Convert TrackedOrder to domain PlacedOrder.
 
         Extracts data directly from raw TWS objects (Contract, Order, OrderState)
         stored in TrackedOrder without relying on flattened dict fields.
 
+        Bracket enrichment (takeProfit, stopLoss, trailingStopPips) is handled
+        downstream by OrderManager — this method only sets parent identification.
+
         Args:
-            tracked: TrackedOrder wrapping raw TWS objects
-            bracket_context: Optional bracket info from original PreOrder.
-                TWS doesn't return bracket prices in callbacks, so this
-                preserves the original stopLoss/takeProfit/trailingStopPips.
+            contract: Override contract (e.g. with full details from reqContractDetails).
 
         Returns:
             Domain PlacedOrder model
@@ -348,27 +287,11 @@ class TrackedOrder:
         if self.fills and filled_qty > 0:
             avg_price = self.fills[-1].avgFillPrice
 
-        # Bracket fields from context (TWS doesn't return these in callbacks)
-        take_profit: float | None = None
-        stop_loss: float | None = None
-        trailing_stop_pips: float | None = None
-        stop_type: StopType | None = None
-
-        if bracket_context:
-            take_profit = bracket_context.take_profit
-            stop_loss = bracket_context.stop_loss
-            trailing_stop_pips = bracket_context.trailing_stop_pips
-            if bracket_context.stop_type is not None:
-                stop_type = StopType(bracket_context.stop_type)
-
         # Parent order linking (for bracket child orders)
         # TWS sets order.parentId > 0 for child orders (TP/SL)
         parent_id: str | None = None
         parent_type: ParentType | None = None
-        if self.parent_filled:
-            parent_id = symbol
-            parent_type = ParentType.POSITION
-        elif order.parentId and order.parentId > 0:
+        if order.parentId and order.parentId > 0:
             parent_id = str(order.parentId)
             parent_type = ParentType.ORDER
         else:
@@ -387,14 +310,12 @@ class TrackedOrder:
             status=status,
             limitPrice=limit_price,
             stopPrice=stop_price,
-            takeProfit=take_profit,
-            stopLoss=stop_loss,
-            guaranteedStop=None,  # Not supported by TWS
-            trailingStopPips=trailing_stop_pips,
-            stopType=stop_type,
+            takeProfit=None,
+            stopLoss=None,
+            trailingStopPips=None,
+            stopType=None,
             filledQty=filled_qty if filled_qty > 0 else None,
             avgPrice=avg_price,
-            updateTime=None,  # Could add timestamp from last fill
             parentId=parent_id,
             parentType=parent_type,
         )
@@ -538,16 +459,12 @@ class OrderTracker(OrderTrackerCBWiringInterface):
 
         notify_list: list[TrackedOrder] = [tracked]
 
+        # When a parent fills, re-notify its children so downstream
+        # consumers (OrderManager) can reclassify them as position brackets.
         if tracked.domain_status == OrderStatus.FILLED:
             for child in self._orders.values():
                 if child.order.parentId == orderId:
-                    child.parent_filled = True
                     notify_list.append(child)
-
-        if tracked.order.parentId and not tracked.parent_filled:
-            parent_tracked = self._orders.get(tracked.order.parentId)
-            if not parent_tracked or tracked.domain_status == OrderStatus.FILLED:
-                tracked.parent_filled = True
 
         def resolve_hook(future: asyncio.Future, tracked: TrackedOrder) -> None:
             if not future.done():
@@ -628,7 +545,7 @@ class OrderTracker(OrderTrackerCBWiringInterface):
             logger.info(
                 f"placed order (protobuf): id={order_id}, ticker={ticker}, Exchange={contract.exchange} "
                 f"action={order.action}, type={order.orderType} "
-                f"qty={order.totalQuantity}, type={order.lmtPrice or order.auxPrice} "
+                f"qty={order.totalQuantity}, price={order.lmtPrice or order.auxPrice} "
             )
 
     def __submit_order(

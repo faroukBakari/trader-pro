@@ -27,11 +27,7 @@ from trading_api.models.broker import (
 )
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import QuoteValues
-from trading_api.providers.tws.order_tracker import (
-    BracketContext,
-    OrderFill,
-    TrackedOrder,
-)
+from trading_api.providers.tws.order_tracker import OrderFill, TrackedOrder
 from trading_api.providers.tws.position_tracker import TrackedPosition
 from trading_api.providers.tws.tws_mappers import (
     brackets_to_tws,
@@ -976,22 +972,16 @@ class TestTrackedOrderToPlacedOrder:
 
         assert result.status == OrderStatus.CANCELED
 
-    def test_bracket_context_preserved(self) -> None:
-        """Test that BracketContext fields are preserved."""
+    def test_bracket_fields_default_to_none(self) -> None:
+        """Bracket fields are None — enrichment is OrderManager's responsibility."""
         tracked = self._make_tracked_order(order_type="LMT", lmt_price=150.00)
-        bracket_context = BracketContext(
-            take_profit=160.00,
-            stop_loss=145.00,
-            trailing_stop_pips=5.00,
-            stop_type=int(StopType.TRAILING_STOP),
-        )
 
-        result = tracked.to_domain(bracket_context=bracket_context)
+        result = tracked.to_domain()
 
-        assert result.takeProfit == 160.00
-        assert result.stopLoss == 145.00
-        assert result.trailingStopPips == 5.00
-        assert result.stopType == StopType.TRAILING_STOP
+        assert result.takeProfit is None
+        assert result.stopLoss is None
+        assert result.trailingStopPips is None
+        assert result.stopType is None
 
     def test_child_order_has_parent_id(self) -> None:
         """Test that child bracket orders have parentId set."""

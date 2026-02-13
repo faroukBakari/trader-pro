@@ -793,6 +793,12 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
           if (data.equity !== undefined && data.equity !== null) {
             this.equity.setValue(data.equity)
           }
+          if (data.unrealizedPL !== undefined && data.unrealizedPL !== null) {
+            this.unrealizedPL.setValue(data.unrealizedPL)
+          }
+          if (data.realizedPL !== undefined && data.realizedPL !== null) {
+            this.realizedPL.setValue(data.realizedPL)
+          }
         },
         (error) => this.handleSubscriptionError('Equity', error)
       ).then((topic) => {
