@@ -146,6 +146,18 @@ When assessing task complexity for tier selection:
 | **Skipping conditional gates** | "Non-trivial" qualifier + casual framing → gate bypassed | Use unconditional gates with fast exit (see `prompting-guide`) |
 | **Static tier from initial assessment** | First impression sticks even after discovering complexity | Re-evaluate tier after first tool result reveals actual scope |
 
+### SOP-Maze: Procedural Routing Vulnerability
+
+LLMs struggle with **branching conditionals in SOPs**, even when individual reasoning steps work (arXiv 2510.08942v2 — SOP-Maze benchmark). Failure modes: (a) multi-branch decision trees with >3 paths, (b) noisy chains where early context decays, (c) arithmetic embedded in routing decisions (e.g., "if count >5 then...").
+
+**Implications for routing design**:
+- **Keep routing tables flat** — domain-match lookups (like CLAUDE.md Step 1 table), not nested conditionals
+- **Avoid arithmetic in tier assessment** — Step 2 tier table uses subjective judgment, which is SOP-Maze-vulnerable when criteria involve numeric thresholds
+- **Simplify decision criteria** — "multi-file OR ambiguous scope" → T2 (simple disjunction) beats "if >3 files AND >2 modules then T3" (noisy chain)
+- **Degrade gracefully** — when routing is ambiguous, default to higher tier (conservative) rather than lower tier (risky)
+
+The CLAUDE.md Step 1 routing table is well-designed (flat domain-match). Step 2 tier assessment is borderline — keep criteria descriptive, not arithmetic.
+
 ---
 
 ## Integration Patterns

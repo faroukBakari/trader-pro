@@ -26,18 +26,19 @@ Prompt engineering patterns that exploit Opus 4.6's strengths (deep reasoning, i
 
 ## Opus 4.6 Flaw Catalog
 
-Eight documented behavioral flaws from Anthropic sources, engineering blogs, research papers, and practitioner reports. Each is assigned a severity and primary mitigation.
+Nine documented behavioral flaws from Anthropic sources, engineering blogs, research papers, and practitioner reports. Each is assigned a severity and primary mitigation.
 
 | ID | Flaw | Severity | Description | Primary Guard |
 |----|------|----------|-------------|---------------|
 | **O1** | Framing bias amplification | HIGH | Adopts user's implicit complexity assessment. Casual framing ("typo", "quick fix") causes process gate bypass and under-allocation of reasoning effort. Anchoring bias confirmed across LLMs (ScienceDirect RCT). | Unconditional gates + domain classification |
 | **O2** | Selective completion | HIGH | Completes easy parts, skips hard parts without flagging. Self-described: "I was lazy and chased speed." (GitHub #24129). Worsens with long task lists. | Enumerated completion checklist |
 | **O3** | Premature victory | HIGH | Declares task complete without proper verification. "A later agent would look around, see progress, and declare done." (Anthropic Engineering). | Delivery quality gate + verification mandate |
-| **O4** | Qualifier enforcement paradox | HIGH | Enhanced system prompt compliance causes Opus to faithfully evaluate conditional qualifiers ("non-trivial", "when appropriate") — and bypass gates when the qualifier evaluates false. More capable = more precise escape hatch exploitation. | Unconditional gates (see `prompting-guide` § Gate Design) |
+| **O4** | Qualifier enforcement paradox | HIGH | Enhanced system prompt compliance → faithfully evaluates conditional qualifiers ("non-trivial", "when appropriate") → bypasses gates when qualifier = false. Amplified by Claude Code's system-reminder injection: "may or may not be relevant to your tasks" provides dismissal heuristic Opus can evaluate as "not relevant." Cannot fix at skill level — requires platform change or CLAUDE.md counter-instruction. | Unconditional gates (see `prompting-guide` § Gate Design) |
 | **O5** | Overeager agentic actions | MEDIUM | Takes risky actions without confirmation in agentic contexts. System card: "aggressively acquiring auth tokens or sending unauthorized emails to complete tasks." | Explicit confirmation gates for irreversible actions |
 | **O6** | Overthinking degradation | MEDIUM | Up to 36% performance degradation on simple/intuitive tasks when thinking is at `high`/`max`. Extended reasoning on trivial tasks produces worse results than direct response. | Match effort to tier (see `thinking-integration`) |
 | **O7** | Confidence inflation | LOW-MED | High reasoning depth correlates with increased confidence in conclusions, even incorrect ones. Harder for Opus to self-correct after deep reasoning. | Falsification-based verification, not "check your work" |
 | **O8** | Scope expansion | LOW-MED | When reasoning deeply, identifies adjacent improvements and acts on them without asking. Less aggressive than Sonnet F5 but still present on long sessions. | `<scope-fence>` section |
+| **O9** | Goal-directed override | HIGH | When completing a user task conflicts with a CLAUDE.md process rule, Opus prioritizes task completion. Distinct from O1 (classification) — this is runtime priority inversion during execution. Source: Frontiers in AI 2025, arXiv 2601.04170. | Align process gates with task goals (make them progress, not obstacles) or structural enforcement (hooks, tool gates) |
 
 ---
 
@@ -51,11 +52,12 @@ Before writing a prompt for an Opus-powered context, identify which flaws the ta
 |---------------------|---------------|-----------------|
 | User-framed as simple ("fix", "typo", "quick") | O1, O4 | Unconditional gates, domain-based classification |
 | Multi-step workflow with >3 steps | O2, O3 | Enumerated checklist, verification mandate |
-| Conditional process rules in system prompt | O4 | Replace qualifiers with unconditional gates |
+| Conditional process rules in system prompt | O4, O9 | Replace qualifiers with unconditional gates; align gates with task goals |
 | Agentic context with tool access | O5, O8 | Confirmation gates, scope fence |
 | Simple/intuitive task at `high`/`max` effort | O6 | Downgrade effort to `low`/`medium` |
 | High-stakes decision or architecture choice | O7 | Adversarial self-correction (T4), falsification checks |
 | Long session (>15 tool calls) | O2, O3, O8 | Constraint anchors + progress tracking |
+| Process-heavy task (many verification steps) | O9 | Make gates feel like progress milestones, or use hooks/tool gates for critical rules |
 
 ### Phase 2: Apply Guard Patterns
 

@@ -141,9 +141,7 @@ Conditional gates use **qualifier words** that require the model to classify the
 "Non-trivial tasks MUST check the skill glossary before writing code."
 ```
 
-The model must answer "Is this task non-trivial?" **before** the gate fires. This classification is biased by user prompt framing (see `reasoning-strategy` § Framing Bias). Words like "typo", "quick", "minor" anchor the model's assessment toward "trivial", causing gate bypass on tasks that actually need the gate.
-
-**Anthropic confirms the mechanism**: Opus 4.5/4.6 are "more responsive to the system prompt" — they parse qualifiers like "non-trivial" as genuine conditions to evaluate, not as soft suggestions. The more capable the model, the more faithfully it enforces the escape hatch.
+The model must classify "Is this task non-trivial?" before the gate fires. User framing ("typo", "quick") biases this assessment toward "trivial", causing bypass. Opus 4.5/4.6 parse qualifiers as genuine conditions, not soft suggestions — more capability = more faithful escape-hatch enforcement.
 
 ### The Unconditional Gate Pattern
 
@@ -155,13 +153,18 @@ Replace complexity-gated triggers with **unconditional gates + fast exit**:
  If no skill matches the task domain → proceed directly."
 ```
 
-**How it works**:
-1. Gate fires on every qualifying action (unconditional)
-2. The gate body performs domain matching (not complexity assessment)
-3. If no match → fast exit, near-zero cost
-4. If match → skill loaded, process followed
+**Mechanism**: Gate fires unconditionally → domain match (not complexity assessment) → no match = fast exit (zero tool calls if glossary in context) → match = skill loaded.
 
-**Why it's cheap**: If glossary descriptions are already in the system prompt, the "check" is pattern-matching against loaded context — zero extra tool calls for non-matching tasks.
+### Enforcement Tiers: Structural > Prompt-Based
+
+**System/user prompt separation does NOT reliably establish instruction priority** (arXiv 2502.15851). Societal framings (authority, expertise, consensus) have stronger influence than technical role separation. Pretraining social structures function as latent behavioral priors with greater impact than post-training guardrails.
+
+**Practical implication**: For critical compliance, use structural enforcement:
+- **Tier 1 (Structural)**: Hooks (PreToolUse/PostToolUse), tool gates (required tool call before action), schema validation (structured output forcing)
+- **Tier 2 (Prompt-based)**: XML sections, constraint tiering, unconditional gates
+- **Tier 3 (Soft)**: Guidelines, examples, suggestions
+
+Prompt-based rules are compliance mechanisms only when violations are non-critical.
 
 ### Qualifier Words to Avoid in Gates
 
@@ -183,6 +186,20 @@ Replace complexity-gated triggers with **unconditional gates + fast exit**:
 | **Escalation** (upgrade effort for harder tasks) | Conditional on **observable signals** | "Escalate to Opus if reasoning exceeds 3 hops." |
 
 **Rule**: Process compliance gates should be **unconditional**. Only optimization and escalation gates should be conditional — and their conditions must be **objective** (file count, error count, hop count), never **subjective** (complexity, importance, triviality).
+
+---
+
+## Structured Output as Compliance Mechanism
+
+When output format IS the compliance mechanism, use schema validation to transform prompt-based rules into structural enforcement.
+
+**Pattern**: OpenAI research showed strict JSON schema enforcement improved compliance from <40% to 100%. For critical process gates (routing decisions, safety checks), require structured output with:
+
+1. **Schema validation** — typed output (JSON/Pydantic) with required fields
+2. **Semantic validation** — field values match expected range/format
+3. **Fail-fast** — validation errors block execution before next step
+
+**Example**: Routing decision must be emitted as `{"category": string, "skill": string|null}` before first action. Invalid JSON = task rejected. This makes compliance architectural, not advisory.
 
 ---
 

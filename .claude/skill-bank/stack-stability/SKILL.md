@@ -107,6 +107,10 @@ Before applying any T2+ change, adversarially challenge it. Every claim about "g
 | Could the same outcome be achieved by **doing nothing** + relying on existing behavior? | Do nothing |
 | Are you adding structure to a problem that occurs **less than once a month**? | Skip — ad-hoc handling is cheaper |
 
+**CLAUDE.md Size** — attention dilution is real:
+
+Adding content increases attention dilution for ALL rules. Every line added dilutes every other line. Research confirms that longer system prompts cause a zero-sum attention budget — models apply U-shaped attention curves where middle content is most diluted (Liu et al. 2023, Lost in the Middle; Vercel research). The K1 gate (400 lines) is an upper bound, not a target. Optimal range: 200-300 lines.
+
 **Cursor balance** — constraints are spectrums, not switches:
 
 | Cursor | Too Tight | Too Loose | Check |
