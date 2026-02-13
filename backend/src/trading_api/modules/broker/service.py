@@ -9,11 +9,13 @@ This service acts as a Backend-For-Frontend (BFF) layer that:
 Pattern mirrors DatafeedService exactly.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 
 from trading_api.capabilities.broker import BrokerCapability
 from trading_api.models.broker import (
@@ -34,6 +36,7 @@ from trading_api.models.broker import (
 )
 from trading_api.models.common import ProviderCapabilitySpec
 from trading_api.models.exceptions import ServiceException, TradingApiException
+from trading_api.modules.broker.order_manager import OrderManager
 from trading_api.shared.ws.ws_router import (
     ProviderUpdateCallback,
     TopicErrorCallback,
@@ -119,17 +122,25 @@ class BrokerService(WsRouteService):
         # Track provider subscription IDs for each topic (for cleanup)
         self._topic_to_subscription_id: dict[str, str] = {}
 
+        # Service-layer order state with bracket enrichment
+        self._order_manager = OrderManager()
+
     # ================================ GETTERS (delegate to provider) =========
 
-    async def get_orders(self, user_id: str) -> List[PlacedOrder]:
-        """Get all orders for a user.
+    async def get_orders(self, user_id: str) -> list[PlacedOrder]:
+        """Get all orders for a user (bracket-enriched).
+
+        Syncs provider state into OrderManager and returns enriched orders
+        where parent orders carry bracket fields derived from their children.
 
         Args:
             user_id: User ID for scoping (unused for now)
         """
-        return await self.broker_provider.get_orders()
+        raw_orders = await self.broker_provider.get_orders()
+        self._order_manager.sync(raw_orders)
+        return self._order_manager.get_all()
 
-    async def get_positions(self, user_id: str) -> List[Position]:
+    async def get_positions(self, user_id: str) -> list[Position]:
         """Get all positions for a user.
 
         Args:
@@ -137,7 +148,7 @@ class BrokerService(WsRouteService):
         """
         return await self.broker_provider.get_positions()
 
-    async def get_executions(self, symbol: str, user_id: str) -> List[Execution]:
+    async def get_executions(self, symbol: str, user_id: str) -> list[Execution]:
         """Get execution history for a symbol.
 
         Args:
@@ -146,7 +157,7 @@ class BrokerService(WsRouteService):
         """
         return await self.broker_provider.get_executions(symbol)
 
-    async def get_all_executions(self, user_id: str) -> List[Execution]:
+    async def get_all_executions(self, user_id: str) -> list[Execution]:
         """Get all execution history (across all symbols).
 
         Args:
@@ -227,7 +238,7 @@ class BrokerService(WsRouteService):
         await self.broker_provider.cancel_order(order_id)
 
     async def close_position(
-        self, position_id: str, user_id: str, amount: Optional[float] = None
+        self, position_id: str, user_id: str, amount: float | None = None
     ) -> None:
         """Close position (full or partial).
 
@@ -243,7 +254,7 @@ class BrokerService(WsRouteService):
         position_id: str,
         brackets: Brackets,
         user_id: str,
-        custom_fields: Optional[dict[str, Any]] = None,
+        custom_fields: dict[str, Any] | None = None,
     ) -> None:
         """Update position brackets.
 
@@ -324,8 +335,15 @@ class BrokerService(WsRouteService):
         logger.info(f"Creating topic: {topic}")
 
         if topic_type == "orders":
+
+            async def _order_update_callback(order: PlacedOrder) -> None:
+                """Route order updates through OrderManager for bracket enrichment."""
+                affected = self._order_manager.upsert(order)
+                for enriched_order in affected:
+                    await topic_update(enriched_order)
+
             subscription_id = await self.broker_provider.subscribe_orders(
-                callback=topic_update,
+                callback=_order_update_callback,
                 on_error=on_provider_error,
             )
             self._topic_to_subscription_id[topic] = subscription_id
