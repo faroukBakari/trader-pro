@@ -46,21 +46,15 @@ disable-model-invocation: true
 
 ### Session Introspection Commands
 
-User-invocable slash commands for context self-awareness. The agent cannot invoke these directly but should **know they exist** and **recommend them** when relevant.
+User-invocable slash commands (agent cannot invoke directly — recommend when relevant):
 
-| Command | What It Shows | When to Recommend |
-|---------|---------------|-------------------|
-| `/context` | Colored grid visualizing what's consuming context space | Before large tasks, when suspecting context pressure |
-| `/cost` | Token usage statistics across the session | After heavy tool usage, for FinOps awareness |
-| `/compact [focus]` | Manually triggers context compaction with optional focus instructions | When context is filling up, before auto-compression kicks in silently |
+| Command | Shows | When |
+|---------|-------|------|
+| `/context` | Context usage grid | Before large tasks, context pressure |
+| `/cost` | Token stats | After heavy tool use |
+| `/compact [focus]` | Manual compaction with optional focus | Context filling up |
 
-**`/compact` details**:
-- Accepts optional focus instructions: `/compact focus on broker integration changes`
-- Clears older tool outputs first, then summarizes older turns
-- Preserves CLAUDE.md rules and `Compact Instructions` section
-- `PreCompact` hook fires with `trigger: "manual"` or `"auto"` — configurable in `.claude/settings.json`
-
-**Auto-compaction**: Happens silently when context approaches limits. The agent receives no signal — earlier context may be summarized or dropped. Mitigation: `Compact Instructions` section in CLAUDE.md defines preservation priorities.
+**Auto-compaction**: Happens silently at limits — no agent signal. Mitigation: `Compact Instructions` (CLAUDE.md §5) defines preservation priorities. `PreCompact` hook fires with `trigger: "manual"/"auto"`.
 
 ### IDE MCP Bridge
 
@@ -158,6 +152,33 @@ Directly editable from WSL — no manual user intervention needed:
 | WSL headless Chromium | Works | Playwright tests, visual verification, CI |
 | Windows Chrome (direct launch) | Works | Open URLs for user, demo |
 | Playwright MCP Chrome profile | Installed at `~/.cache/ms-playwright/mcp-chrome-*` | Persistent browser sessions |
+
+---
+
+## Compliance Hooks
+
+**Core insight**: Structural enforcement (hooks, tool gates) achieves 95-100% compliance vs 53-79% for prompt-based instructions. Hooks = "structured prompt injection at opportune times" (Trail of Bits).
+
+### Active Hooks (Tier 1: Cannot Be Bypassed by Model)
+
+| Event | Script | Blocks |
+|-------|--------|--------|
+| UserPromptSubmit | `compact-enforcer.sh` | Context ≥55% (exit 2) |
+| PreToolUse | `output-guard.sh` | Unbounded Bash: `grep -r`, `cat`, `docker logs`, `git log/diff` without limits |
+| PostToolUse | `mcp-output-guard.sh` | MCP responses >20KB → dump to `/tmp/`, replace context with preview |
+
+**Config**: `.claude/settings.local.json` (hooks key) | **Limits**: Cannot trigger CLI commands (`/compact`, `/cost`), not a security boundary, `updatedMCPToolOutput` MCP-only
+
+### Hook Design Patterns
+
+| Event | Fires | Can | Use For |
+|-------|-------|-----|---------|
+| PreToolUse | Before tool call | Block (exit 2), inject context | Routing gates, skill loading checks, tool validators |
+| PostToolUse | After completion | Replace MCP output, log/dump | Size guards, validation, filtering |
+| UserPromptSubmit | Before prompt | Block, inject context | Context caps, pattern validation |
+| PreCompact | Before compact | Inject instructions | Preservation priorities |
+
+**Prompt rules → hook candidates**: Skill routing gate (§0), large file reads (>200 lines), diagnostic verification (quality gate)
 
 ---
 

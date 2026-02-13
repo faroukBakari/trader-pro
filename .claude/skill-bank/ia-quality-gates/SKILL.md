@@ -63,7 +63,7 @@ Execute every gate in the applicable set. If ANY gate fails, fix and re-run.
 
 | Gate | Check | Fail Condition | Fail Action |
 |------|-------|----------------|-------------|
-| **K1: Kernel Size** | CLAUDE.md stays under 400 lines | Adding rule would exceed 400 lines | Extract methodology to skill instead |
+| **K1: Kernel Size** | CLAUDE.md stays under 400 lines | Adding rule would exceed 400 lines | Extract methodology to skill instead. **Rationale**: Attention dilution — research confirms each additional line reduces compliance with all existing lines (U-shaped attention curve). Size gates are compliance gates, not just readability gates. |
 | **K2: Enforceable** | Rule has enforcement mechanism (settings.json, gate, or tool check) | Rule says "should" with no enforcement | Add enforcement or demote to skill guidance |
 | **K3: No Methodology** | Rule is a constraint/convention, not a procedure | Contains step-by-step workflows (>10 lines) | Extract to skill, keep 1-line reference |
 | **K4: Permission Coverage** | New tool patterns covered by settings.json permissions | New tool usage without permission entry | Update settings.json |

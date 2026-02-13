@@ -31,52 +31,38 @@ The words you choose determine whether the model genuinely reasons or merely per
 
 ### Effective vs Ineffective Wordings
 
-| Effective | Why It Works | Ineffective | Why It Fails |
-|-----------|-------------|-------------|-------------|
-| "Analyze X by examining Y and Z" | Names specific dimensions | "Think carefully about X" | No structure — produces a paragraph |
-| "Before deciding, reason through:" | Explicit sequencing | "Consider this problem" | No action trigger |
-| "Compare options A and B on: cost, risk, complexity" | Named criteria | "Weigh the pros and cons" | Model picks easy/shallow criteria |
-| "State your conclusion, then argue against it" | Forced adversarial | "Make sure you're right" | Triggers confirmation bias |
-| "List 3 assumptions. Which could be wrong?" | Quantified + challenge | "Be thorough" | Unmeasurable — ignored |
-| "What evidence would change your answer?" | Falsifiability trigger | "Please reason carefully" | Polite filler — zero signal |
+| Effective | Ineffective | Why |
+|-----------|-------------|-----|
+| "Analyze X by examining Y and Z" | "Think carefully about X" | Names dimensions vs no structure |
+| "Before deciding, reason through:" | "Consider this problem" | Explicit sequencing vs no trigger |
+| "Compare A and B on: cost, risk, complexity" | "Weigh the pros and cons" | Named criteria vs shallow defaults |
+| "State conclusion, then argue against it" | "Make sure you're right" | Forced adversarial vs confirmation bias |
+| "List 3 assumptions. Which could be wrong?" | "Be thorough" | Quantified + challenge vs unmeasurable |
+| "What evidence would change your answer?" | "Please reason carefully" | Falsifiability vs polite filler |
 
-**Evidence**: Kojima et al. (2022) showed that even minimal triggers ("Let's think step by step") improve accuracy from ~17% to ~78% on MultiArith. But structured triggers outperform generic ones — the specificity of the directive correlates with reasoning depth.
+**Evidence**: Kojima et al. (2022) — "Let's think step by step" improved accuracy ~17%→~78% on MultiArith. Structured triggers outperform generic.
 
 ### Directive Verb Effectiveness
-
-Verbs that **activate** genuine analytical processing (ranked by reliability):
 
 | Tier | Verbs | Effect |
 |------|-------|--------|
 | **Strong** | Analyze, Decompose, Compare, Diagnose, Evaluate, Contrast | Force examination of internals/relationships |
-| **Medium** | Identify, Assess, Classify, Prioritize, Trace | Guide attention to specific aspects |
-| **Weak** | Consider, Think about, Look at, Review, Check | Vague — model chooses minimal path |
-| **Avoid** | Try to, You might, Perhaps, Please | Hedging — Sonnet interprets as optional |
+| **Medium** | Identify, Assess, Classify, Prioritize, Trace | Guide attention to specifics |
+| **Weak** | Consider, Think about, Look at, Review, Check | Vague — minimal path |
+| **Avoid** | Try to, You might, Perhaps, Please | Hedging — interpreted as optional |
 
-**Usage rule**: Lead each reasoning step with a **strong** or **medium** verb. Reserve weak verbs for optional sub-steps only.
+**Rule**: Lead with strong/medium verbs. Reserve weak verbs for optional sub-steps only.
 
-### Structure-Forcing Phrases
+### Structure-Forcing & Depth-Anchoring Phrases
 
-Phrases that **constrain** reasoning into productive shapes:
-
+**Constraint patterns** (shape reasoning):
 ```
-"For each of the following N dimensions:"     → Forces enumerated multi-perspective
-"Present your analysis as:"                    → Forces specific output format
-"Before answering, reason through these steps:" → Forces pre-answer analysis
-"Rank by [criterion], explaining each ranking:" → Forces ordered comparison
-"State your answer. Then list 3 objections:"   → Forces adversarial self-check
+"For each N dimensions:" | "Present as:" | "Before answering, reason through:" | "Rank by X, explaining:" | "State answer. Then list 3 objections:"
 ```
 
-### Depth-Anchoring Phrases
-
-Phrases that **maintain** reasoning quality through long chains. Place at methodology midpoints or before critical steps:
-
+**Depth anchors** (maintain quality through chains):
 ```
-"For each point, provide supporting evidence"           → Evidence requirement
-"If any step requires >1 assumption, state them"        → Assumption surfacing
-"Express uncertainty where applicable (high/med/low)"   → Calibrated confidence
-"State what you DON'T know"                             → Negative knowledge
-"What would need to be true for this to be wrong?"      → Falsifiability check
+"Provide supporting evidence" | "State assumptions" | "Express uncertainty (high/med/low)" | "State what you DON'T know" | "What makes this wrong?"
 ```
 
 ---
@@ -173,29 +159,13 @@ Then state what additional information would raise your confidence."
 
 ## Part 6: Reasoning Quality Signals
 
-### Shallow CoT Indicators
+### Reasoning Quality Signals
 
-Signs the model is performing reasoning theater rather than genuine analysis:
+**Shallow CoT (theater)**:
+- Echo (restates question for 3 sentences) | Single-perspective despite multi-perspective directive | No uncertainty | Predetermined conclusion | Generic observations
 
-| Signal | Example | Indicates |
-|--------|---------|-----------|
-| Echo — restates the question as analysis | "The problem asks us to..." for 3 sentences | No actual reasoning |
-| Single-perspective despite multi-perspective directive | Analyzes only "technical feasibility" when asked for 3 perspectives | Lazy compliance |
-| No uncertainty expressed | Every conclusion stated with certainty | Confidence inflation |
-| Conclusion predetermined | "Steps" lead inevitably to the obvious answer | Reverse-engineered reasoning |
-| Generic observations | "This is an important consideration" | No domain-specific analysis |
-
-### Genuine Reasoning Markers
-
-Signs the model is actually analyzing:
-
-| Signal | Example | Indicates |
-|--------|---------|-----------|
-| Tension identified | "Factor A supports option 1, but factor B favors option 2" | Real tradeoff analysis |
-| Assumption surfaced | "This assumes the API is stateless — if not, the approach changes" | Critical thinking |
-| Uncertainty expressed | "I'm less confident about X because..." | Calibrated judgment |
-| Counter-evidence cited | "However, the test results suggest the opposite" | Genuine evaluation |
-| Novel connection | "This is similar to the pattern in module Y" | Cross-domain synthesis |
+**Genuine reasoning**:
+- Tension identified ("A supports X, but B favors Y") | Assumptions surfaced ("assumes stateless — changes if not") | Uncertainty expressed ("less confident on X because...") | Counter-evidence cited | Novel connections
 
 ---
 
@@ -211,6 +181,7 @@ Signs the model is actually analyzing:
 | **Exceeding model capacity** | 6-hop chain on Sonnet → quality cliff | Decompose into phases within model sweet spot |
 | **Verification without criteria** | "Are you sure?" → sycophantic "yes" | "What evidence contradicts this?" |
 | **Polite hedging** | "You might want to consider..." | Direct: "Analyze X by examining Y" |
+| **Structured CoT in JSON** | Forcing reasoning into JSON schema increases parsing brittleness, prompt injection surface, and constrains natural token flow without improving quality (Yoav Goldberg) | Use structured output for RESULTS, not REASONING. Let the model reason freely, then format the output. |
 
 ---
 

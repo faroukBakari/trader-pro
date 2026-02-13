@@ -122,6 +122,42 @@ In long conversations, earlier context gets compressed or lost. Design prompts t
 
 ---
 
+## Position Sensitivity: The U-Shaped Attention Curve
+
+**Core insight**: LLMs exhibit a U-shaped attention curve (Liu et al. 2023, Stanford). Instructions at the start and end of context are processed effectively; mid-document content suffers ~20-30% compliance loss. Instruction fine-tuning worsens this by biasing models toward beginning positions.
+
+**Practical rules**:
+- **Critical rules**: place at start AND end of system prompt (dual placement)
+- **Mid-document rules**: higher skip risk — use structural enforcement or hooks for these
+- **Long system prompts** (>200 lines): mid-section rules have significantly degraded compliance
+- **End-of-prompt positioning**: Anthropic recommends repeating critical guidelines at the end of system prompts. End-of-prompt rules benefit from recency bias. This is the positional complement to the constraint-anchor pattern.
+
+**Design implications**:
+- Opening section: role, core constraints, behavioral defaults
+- Middle section: domain rules, examples, reference tables (accept some drift)
+- Closing section: restate critical constraints, quality gates, anti-patterns
+
+---
+
+## Passive vs Active Context: The Compliance Gap
+
+**Core insight**: Vercel research found passive context (always-in-context, like AGENTS.md) achieves 100% compliance vs 53-79% for active skill loading (model must decide to Read a file). Each active-retrieval decision point is a compliance dropout opportunity.
+
+**Decision framework**:
+
+| Context Type | Placement | Use For |
+|--------------|-----------|---------|
+| **Passive** (in CLAUDE.md) | Always in system prompt | Critical rules, routing protocol, behavioral defaults — things that MUST be followed every turn |
+| **Active** (skills) | Loaded on-demand via Read | Methodology, templates, detailed procedures — things needed only when relevant |
+
+**Anti-pattern**: Putting compliance-critical instructions behind an active-retrieval gate. If it's a hard requirement, make it passive.
+
+**Example split**:
+- Passive: "ALWAYS run tests before marking code complete"
+- Active: Detailed test fixture patterns, mocking strategies, coverage thresholds
+
+---
+
 ## Anti-Patterns: Context Waste
 
 | Waste Pattern | Cost | Fix |
