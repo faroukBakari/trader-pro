@@ -17,6 +17,7 @@ Systematic validation framework for IA stack artifacts. Gate sets are organized 
 - **Creating** a new skill — run S1-S5 before output
 - **Adding/modifying** a CLAUDE.md §4 routing entry — run R1-R5
 - **Modifying** a CLAUDE.md kernel rule — run K1-K4
+- **Creating/modifying** an agent template — run A1-A7 before output
 - **Validating** an existing artifact — run all applicable gates and report
 
 ---
@@ -30,6 +31,7 @@ Systematic validation framework for IA stack artifacts. Gate sets are organized 
 | Skill (`SKILL.md`) | S1–S5 | 5 |
 | CLAUDE.md routing entry (§4) | R1–R5 | 5 |
 | CLAUDE.md kernel rule | K1–K4 | 4 |
+| Agent template (`.claude/agents/*.md`) | A1–A7 | 7 |
 
 ### Phase 2: Run Gates
 
@@ -68,6 +70,23 @@ Execute every gate in the applicable set. If ANY gate fails, fix and re-run.
 | **K3: No Methodology** | Rule is a constraint/convention, not a procedure | Contains step-by-step workflows (>10 lines) | Extract to skill, keep 1-line reference |
 | **K4: Permission Coverage** | New tool patterns covered by settings.json permissions | New tool usage without permission entry | Update settings.json |
 
+### Agent Template Gates (A1–A7) — `.claude/agents/*.md`
+
+| Gate | Check | Fail Condition | Fail Action |
+|------|-------|----------------|-------------|
+| **A1: Frontmatter** | `model`, `tools`, `mcpServers` present | Missing required field | Add field to frontmatter |
+| **A2: IA-Guard** | Executor agents have `NEVER...\.claude/` in CRITICAL | Missing IA stack protection | Add CRITICAL constraint |
+| **A3: User Isolation** | All agents have "DO NOT interact with the user" at IMPORTANT+ | Missing user isolation | Add IMPORTANT constraint |
+| **A4: No Subagents** | Executor agents have "DO NOT spawn subagents" | Missing subagent constraint | Add IMPORTANT constraint |
+| **A5: Size Budget** | Agent template ≤400 lines | Template exceeds budget | Compress or extract to skill |
+| **A6: Registration** | Every template file listed in CLAUDE.md §4 | Template exists without registration | Add to CLAUDE.md §4 table |
+| **A7: Delegation** | Every CLAUDE.md §4 entry has a template file | Registered without template | Create template or remove entry |
+
+**Role classification** determines gate applicability:
+- **Governance** (`agentic-designer`): exempt from A2
+- **Executor** (tools include Write/Edit): all gates apply
+- **Read-only** (no Write/Edit): exempt from A2, A4
+
 ---
 
 ## Phase 3: Report Results
@@ -90,5 +109,5 @@ Execute every gate in the applicable set. If ANY gate fails, fix and re-run.
 
 - **Selective checking** — ALL gates in the applicable set must pass
 - **Assumed compliance** — Verify each gate against actual content
-- **Wrong gate set** — Use S/R/K gates for the matching artifact type
+- **Wrong gate set** — Use S/R/K/A gates for the matching artifact type
 - **Soft failures** — Every failure must be resolved before output

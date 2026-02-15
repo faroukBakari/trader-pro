@@ -40,6 +40,7 @@ CLAUDE_DIR = Path(__file__).resolve().parent.parent
 BANK_DIR = CLAUDE_DIR / "skill-bank"
 SKILLS_DIR = CLAUDE_DIR / "skills"
 CLAUDE_MD = CLAUDE_DIR / "CLAUDE.md"
+AGENTS_DIR = CLAUDE_DIR / "agents"
 SETTINGS_JSON = CLAUDE_DIR / "settings.json"
 BASELINE_FILE = CLAUDE_DIR / "scripts" / ".health-baseline.json"
 
@@ -67,11 +68,16 @@ SKILL_MAX_LINES = 500
 CATEGORY_MIN_SKILLS = 3
 CATEGORY_MAX_SKILLS = 12
 
+# Agent template size budget
+AGENT_MAX_LINES = 400
+
 # From skill-design T1 gate
 LEAF_REQUIRED_FIELDS = ("name", "description", "keywords", "category", "disable-model-invocation")
 
-# From skill-design spec — description conciseness
-DESC_MAX_CHARS = 120
+# From skill-design spec — description conciseness (160 aligns with desktop
+# meta-description convention; sufficient for "what + when" structure while
+# keeping glossary token overhead manageable across 60+ skills).
+DESC_MAX_CHARS = 160
 
 # Built-in Claude Code subagent types (from Task tool runtime).
 # Update this list if Claude Code adds new built-in types.
@@ -193,6 +199,107 @@ def discover_referenced_skills(claude_md_text: str) -> set[str]:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Agent template parsing
+# ──────────────────────────────────────────────────────────────────────
+
+def parse_agent_frontmatter(agent_file: Path) -> dict:
+    """Parse agent .md frontmatter (model, tools, mcpServers) using pure stdlib.
+
+    Agent frontmatter uses YAML-like syntax between --- markers.
+    Returns dict with: name, path, model, tools, mcpServers, line_count, text.
+    """
+    text = agent_file.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    name = agent_file.stem  # filename without .md
+
+    result: dict = {
+        "name": name,
+        "path": str(agent_file),
+        "model": "",
+        "tools": [],
+        "mcpServers": [],
+        "line_count": len(lines),
+        "text": text,
+    }
+
+    # Extract frontmatter between first and second ---
+    if not lines or lines[0].strip() != "---":
+        return result
+
+    fm_lines: list[str] = []
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            fm_lines = lines[1:i]
+            break
+
+    # Parse simple YAML: scalar values and list items
+    current_key = ""
+    for line in fm_lines:
+        # Top-level key: value
+        m = re.match(r"^(\w[\w-]*):\s*(.*)", line)
+        if m:
+            key, val = m.group(1), m.group(2).strip()
+            current_key = key
+            if key == "model":
+                result["model"] = val
+            elif key in ("tools", "mcpServers") and not val:
+                result[key] = []  # list follows on next lines
+            elif key in ("tools", "mcpServers") and val:
+                # Inline list: [a, b, c]
+                result[key] = [v.strip().strip("'\"") for v in val.strip("[]").split(",") if v.strip()]
+            continue
+        # List item under current key
+        m_item = re.match(r"^\s+-\s+(.*)", line)
+        if m_item and current_key in ("tools", "mcpServers"):
+            result[current_key].append(m_item.group(1).strip())
+
+    return result
+
+
+def classify_agent_role(agent: dict) -> str:
+    """Classify agent role based on name and tools.
+
+    Returns: 'governance' | 'executor' | 'read-only'
+    """
+    if agent["name"] == "agentic-designer":
+        return "governance"
+    tools = agent.get("tools", [])
+    if "Write" in tools or "Edit" in tools:
+        return "executor"
+    return "read-only"
+
+
+def discover_claude_md_agents(claude_md_text: str) -> set[str]:
+    """Extract agent names from the Custom Agent Templates table in CLAUDE.md §4."""
+    agents: set[str] = set()
+    in_section = False
+    in_table = False
+    for line in claude_md_text.splitlines():
+        if "Custom Agent Templates" in line:
+            in_section = True
+            continue
+        if in_section and not in_table:
+            if line.startswith("|"):
+                in_table = True  # fall through to table parsing
+            elif line.startswith("#"):
+                break
+            else:
+                continue
+        if in_table and line.startswith("|"):
+            if "---" in line or "Agent" in line and "Model" in line:
+                continue
+            cells = [c.strip() for c in line.split("|") if c.strip()]
+            if cells:
+                # Agent name is first column, strip backticks
+                name = cells[0].strip("`").strip()
+                if name and name != "Agent":
+                    agents.add(name)
+        elif in_table and line.strip() and not line.startswith("|") and not line.startswith(">"):
+            break
+    return agents
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Data model
 # ──────────────────────────────────────────────────────────────────────
 
@@ -218,6 +325,7 @@ class StackContext:
     quick_rule_types: set[str] = field(default_factory=set)
     routing_categories: set[str] = field(default_factory=set)
     referenced_skills: set[str] = field(default_factory=set)
+    agents: list[dict] = field(default_factory=list)
 
 
 def load_context() -> StackContext:
@@ -247,6 +355,11 @@ def load_context() -> StackContext:
         ctx.quick_rule_types = discover_quick_rule_types(ctx.claude_md_text)
         ctx.routing_categories = discover_routing_categories(ctx.claude_md_text)
         ctx.referenced_skills = discover_referenced_skills(ctx.claude_md_text)
+
+    # Agents
+    if AGENTS_DIR.is_dir():
+        for agent_file in sorted(AGENTS_DIR.glob("*.md")):
+            ctx.agents.append(parse_agent_frontmatter(agent_file))
 
     return ctx
 
@@ -529,6 +642,142 @@ def check_glossary_sync(_ctx: StackContext) -> list[CheckResult]:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Agent template checks (A1–A7)
+# ──────────────────────────────────────────────────────────────────────
+
+def check_agent_frontmatter(ctx: StackContext) -> list[CheckResult]:
+    """A1: Agent templates must have model, tools, mcpServers in frontmatter."""
+    results = []
+    for agent in ctx.agents:
+        missing = []
+        if not agent["model"]:
+            missing.append("model")
+        if not agent["tools"]:
+            missing.append("tools")
+        if not agent["mcpServers"]:
+            missing.append("mcpServers")
+        if missing:
+            results.append(CheckResult(
+                name=agent["name"], gate="A1",
+                passed=False, finding=f"Missing: {', '.join(missing)}", severity="FAIL",
+            ))
+
+    if not results:
+        return [CheckResult(name="all-agents", gate="A1", passed=True,
+                            finding=f"All {len(ctx.agents)} agents have complete frontmatter")]
+    return results
+
+
+def check_agent_constraints(ctx: StackContext) -> list[CheckResult]:
+    """A2/A3/A4: Agent constraint validation by role.
+
+    A2 (IA-guard): executor agents must have NEVER + .claude/ in CRITICAL constraints.
+    A3 (user-isolation): all agents must have "DO NOT interact with the user".
+    A4 (no subagents): executor agents must have "DO NOT spawn subagents".
+
+    Exemptions by role:
+      governance (agentic-designer): exempt from A2 (it IS the IA stack editor)
+      read-only (no Write/Edit): exempt from A2 (can't write) and A4 (spawning is safe)
+    """
+    results = []
+    for agent in ctx.agents:
+        role = classify_agent_role(agent)
+        text = agent["text"]
+
+        # A2: IA-guard constraint (executor only)
+        if role == "executor":
+            # Look for NEVER + .claude/ pattern anywhere in text
+            has_ia_guard = bool(re.search(r"NEVER.*\.claude/", text))
+            if not has_ia_guard:
+                results.append(CheckResult(
+                    name=agent["name"], gate="A2",
+                    passed=False,
+                    finding="Executor missing NEVER...`.claude/` in CRITICAL constraints",
+                    severity="FAIL",
+                ))
+
+        # A3: user-isolation constraint (all agents)
+        # Handle markdown bold: **DO NOT** or plain DO NOT
+        has_user_isolation = bool(re.search(r"\*{0,2}DO NOT\*{0,2} interact with the user", text))
+        if not has_user_isolation:
+            results.append(CheckResult(
+                name=agent["name"], gate="A3",
+                passed=False,
+                finding="Missing 'DO NOT interact with the user' constraint",
+                severity="WARN",
+            ))
+
+        # A4: no-subagent constraint (executor only)
+        if role == "executor":
+            has_no_subagent = bool(re.search(r"\*{0,2}DO NOT\*{0,2} spawn subagent", text))
+            if not has_no_subagent:
+                results.append(CheckResult(
+                    name=agent["name"], gate="A4",
+                    passed=False,
+                    finding="Executor missing 'DO NOT spawn subagents' constraint",
+                    severity="WARN",
+                ))
+
+    if not results:
+        return [CheckResult(name="all-agents", gate="A2-A4", passed=True,
+                            finding=f"All {len(ctx.agents)} agents pass constraint checks")]
+    return results
+
+
+def check_agent_size(ctx: StackContext) -> list[CheckResult]:
+    """A5: Agent templates must not exceed AGENT_MAX_LINES."""
+    oversized = [(a["name"], a["line_count"]) for a in ctx.agents
+                 if a["line_count"] > AGENT_MAX_LINES]
+    if oversized:
+        return [CheckResult(
+            name=name, gate="A5", passed=False,
+            finding=f"{count}/{AGENT_MAX_LINES} lines", severity="WARN",
+        ) for name, count in oversized]
+
+    largest = max(ctx.agents, key=lambda a: a["line_count"]) if ctx.agents else None
+    if largest:
+        return [CheckResult(
+            name="largest", gate="A5", passed=True,
+            finding=f"{largest['name']} ({largest['line_count']} lines)",
+        )]
+    return []
+
+
+def check_agent_claude_md_sync(ctx: StackContext) -> list[CheckResult]:
+    """A6/A7: Agent templates <-> CLAUDE.md §4 table sync.
+
+    A6: template exists on disk but NOT registered in CLAUDE.md -> WARN
+    A7: registered in CLAUDE.md but NO template file on disk -> FAIL
+    """
+    results = []
+    disk_agents = {a["name"] for a in ctx.agents}
+    registered_agents = discover_claude_md_agents(ctx.claude_md_text) if ctx.claude_md_text else set()
+
+    # A6: on disk but not registered
+    for name in sorted(disk_agents - registered_agents):
+        results.append(CheckResult(
+            name=name, gate="A6",
+            passed=False,
+            finding="Template exists but not registered in CLAUDE.md §4",
+            severity="WARN",
+        ))
+
+    # A7: registered but no template file
+    for name in sorted(registered_agents - disk_agents):
+        results.append(CheckResult(
+            name=name, gate="A7",
+            passed=False,
+            finding="Registered in CLAUDE.md §4 but no template file",
+            severity="FAIL",
+        ))
+
+    if not results:
+        return [CheckResult(name="all-agents", gate="A6-A7", passed=True,
+                            finding=f"All {len(disk_agents)} agents synced with CLAUDE.md §4")]
+    return results
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Check registry
 # ──────────────────────────────────────────────────────────────────────
 
@@ -545,6 +794,10 @@ CHECKS: list[tuple[str, str]] = [
     ("check_routing_categories", "Routing table categories vs glossary dirs (R7)"),
     ("check_referenced_skills_exist", "Referenced skills exist in skill-bank (R8)"),
     ("check_glossary_sync", "Glossary files match tree builder (SYNC)"),
+    ("check_agent_frontmatter", "Agent frontmatter completeness (A1)"),
+    ("check_agent_constraints", "Agent constraints: IA-guard (A2), user-isolation (A3), subagent (A4)"),
+    ("check_agent_size", "Agent template size limits (A5)"),
+    ("check_agent_claude_md_sync", "Agent template ↔ CLAUDE.md sync (A6, A7)"),
 ]
 
 
@@ -555,6 +808,7 @@ CHECKS: list[tuple[str, str]] = [
 def format_report(
     results: list[CheckResult],
     skills_count: int,
+    agents_count: int,
     baseline: set[str],
     show_passing: bool,
 ) -> str:
@@ -565,7 +819,7 @@ def format_report(
 
     lines = ["## Stack Health Report", ""]
     lines.append(
-        f"**{skills_count} skills** | "
+        f"**{skills_count} skills, {agents_count} agents** | "
         f"{len(passed)} passed | "
         f"{len(new_failures)} new issue(s) | "
         f"{len(baselined)} baselined"
@@ -632,6 +886,7 @@ def main() -> None:
         new_failures = [r for r in all_results if not r.passed and r.key() not in baseline]
         output = {
             "skills_scanned": len(ctx.skills),
+            "agents_scanned": len(ctx.agents),
             "total_checks": len(all_results),
             "passed": sum(1 for r in all_results if r.passed),
             "new_failures": len(new_failures),
@@ -640,7 +895,7 @@ def main() -> None:
         }
         print(json.dumps(output, indent=2))
     else:
-        print(format_report(all_results, len(ctx.skills), baseline, args.verbose))
+        print(format_report(all_results, len(ctx.skills), len(ctx.agents), baseline, args.verbose))
 
     # CI exit code: only new FAIL-severity issues
     if args.ci:

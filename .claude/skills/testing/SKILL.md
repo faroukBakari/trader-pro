@@ -1,7 +1,7 @@
 ---
 name: testing
 description: Category glossary for testing. Contains 5 skills: `backend-testing`, `frontend-testing`, `frontend-visual-verificatio...
-keywords: [automation, backend, browser, components, coverage, fixtures, mcp, mocking, playwright, pytest, reflexion, screenshots, test-methodology, test-planning, testing, ui-inspection, ui-validation, validation, visual-verification, vitest, vue]
+keywords: [automation, backend, browser, cdp, clipboard, components, coverage, extension-mode, file-upload, fixtures, mcp, mocking, playwright, pytest, reflexion, screenshots, test-methodology, test-planning, testing, ui-inspection, ui-validation, validation, visual-verification, vitest, vue]
 auto-generated: true
 ---
 
@@ -16,7 +16,7 @@ Load any skill below: `Read .claude/skill-bank/{skill-name}/SKILL.md`
 | `backend-testing` | Pytest patterns for trader-pro modular backend. Load when writing, debugging, or analyzing backend test coverage |
 | `frontend-testing` | Vitest/Vue 3 testing patterns for trader-pro frontend. Load when writing or debugging frontend tests |
 | `frontend-visual-verification` | Playwright-based visual validation of UI changes. Load when frontend components, styles, or layouts are modified |
-| `playwright-mcp` | Browser automation via Playwright MCP tools. Load when inspecting UI, debugging frontend, or verifying visual output |
+| `playwright-mcp` | Browser automation via Playwright MCP tools. Load when inspecting UI, debugging frontend, or using extension mode |
 | `test-strategy` | Shared test methodology for backend and frontend. Load when planning test suites or evaluating coverage value |
 
 ## Keyword Index
@@ -26,8 +26,12 @@ Load any skill below: `Read .claude/skill-bank/{skill-name}/SKILL.md`
 | automation | `playwright-mcp` |
 | backend | `backend-testing` |
 | browser | `playwright-mcp` |
+| cdp | `playwright-mcp` |
+| clipboard | `playwright-mcp` |
 | components | `frontend-testing` |
 | coverage | `backend-testing`, `test-strategy` |
+| extension-mode | `playwright-mcp` |
+| file-upload | `playwright-mcp` |
 | fixtures | `backend-testing` |
 | mcp | `playwright-mcp` |
 | mocking | `backend-testing`, `frontend-testing` |
