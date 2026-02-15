@@ -46,7 +46,6 @@ Structured reference of the best online sources for finding reusable AI coding a
 |----------|------|------|-------|-------------|
 | **SkillsMP** | Community | 375+ MCP skills, 130+ prompt skills | — | Largest marketplace. Search by keyword, sort by stars. Supports Claude Code, Copilot, Cursor, Roo, OpenCode. |
 | **davila7/claude-code-templates** | Community | **634 skills** | 19.7k | Largest single collection. Agents, prompt engineering, LLM frameworks, memory systems, tool design. |
-| **github/awesome-copilot** | Official | **37 skills** | 20.5k | GitHub's official. `copilot-sdk`, `gh-cli`, `git-commit`, `chrome-devtools`, Azure integrations. |
 | **sickn33/antigravity-awesome-skills** | Community | Agent orchestration | 7.8k | Agent improvement and evaluation skills. |
 | **NeoLabHQ/context-engineering-kit** | Community | Context engineering | 401 | Prompt engineering, agent evaluation, context patterns. |
 | **openclaw/skills** | Community | Multi-domain | 723 | Community-contributed. Prompt engineering, security, various domains. |
@@ -101,7 +100,6 @@ Structured reference of the best online sources for finding reusable AI coding a
 | Resource | Type | URL |
 |----------|------|-----|
 | **awesome-mcp-servers** | Community | `github.com/punkpeye/awesome-mcp-servers` |
-| **awesome-copilot** | Official | `github.com/github/awesome-copilot` |
 | **awesome-claude-code** | Community | `github.com/anthropics/awesome-claude-code` |
 | **context-engineering-kit** | Community | `github.com/NeoLabHQ/context-engineering-kit` |
 
@@ -117,7 +115,6 @@ Given a search need, pick the right source:
 |-------------|---------------|-----------------|--------------|
 | MCP server to wrap an API | MCP Official Registry | mcp.so, Smithery | `mcp-registry` MCP server |
 | Reusable coding skill | SkillsMP marketplace | davila7/claude-code-templates | `npx skills find <query>` |
-| VS Code Copilot skill | github/awesome-copilot | SkillsMP (`vscode copilot` query) | `npx skills add github/awesome-copilot` |
 | Prompt template | Anthropic Prompt Library | SkillsMP (`prompt-engineering`) | — |
 | Agent definition reference | cursor.directory | VS Code agent mode docs | — |
 | Claude-specific skill | davila7/claude-code-templates | mrgoonie/claudekit-skills | `npx skills add davila7/claude-code-templates` |

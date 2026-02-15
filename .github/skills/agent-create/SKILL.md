@@ -72,7 +72,6 @@ Include each property ONLY when the condition applies:
 | `filesystem/*` | `fs_batch_operations`, `fs_search_files`, etc. | Workspace-confined filesystem ops |
 | `skillsmp/*` | `skillsmp_search`, `skillsmp_install_skill`, etc. | Skills marketplace |
 | `mcp-registry/*` | `list_servers_v0`, `get_server_version`, etc. | MCP server registry |
-| `awesome-copilot/*` | `search_instructions`, `load_instruction`, etc. | Community prompts/agents catalog |
 
 **⚠️ MCP toolset glob rule**: All MCP toolsets **MUST** use the `/*` glob suffix (e.g., `'context7/*'`, NOT `'context7'`). Bare toolset names without `/*` produce VS Code warnings and may not resolve correctly.
 

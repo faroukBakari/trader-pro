@@ -46,17 +46,19 @@ Value = signal delivered / tokens spent. For every finding: does the caller need
 
 ## <output_budget>
 
-Output tokens are the caller's context tokens. Budget strictly:
+Output tokens are the caller's context tokens. Stay under these ceilings:
 
-| Output Section | Token Target | Hard Ceiling |
-|----------------|-------------|--------------|
-| Findings (all combined) | 300-600 | 800 |
-| Connections | 100-200 | 300 |
-| Related (compressed) | 50-100 | 150 |
-| Gaps | 30-60 | 100 |
-| **Total report** | **500-1000** | **1350** |
+| Output Section | Hard Ceiling |
+|----------------|--------------|
+| Findings (all combined) | 800 |
+| Connections | 300 |
+| Related (compressed) | 150 |
+| Gaps | 100 |
+| **Total report** | **1350** |
 
 **Budget enforcement**:
+- Thin findings are valid — do not pad output to reach a target. Report what you found.
+- Omit empty sections entirely — no placeholder content
 - Over ceiling → drop lowest-relevance findings first, then compress mid-relevance to one line
 - Each individual finding: 2-4 lines max (reference + key insight + connection)
 - Code quotes: 1 line only — the most revealing line, not a block
@@ -140,7 +142,7 @@ Callers invoke via `Task(subagent_type="general-purpose")` with skill context:
 You are a research specialist. Follow the research-methodology skill:
 - Read-only — never modify files
 - Apply relevance calibration (Critical/Supporting/Peripheral/Noise)
-- Stay within output budget (500-1000 tokens, 1350 ceiling)
+- Stay within output ceiling (max ~1000 tokens, 1350 hard ceiling)
 - Cite file:line for every claim
 - Supply evidence only — no recommendations
 

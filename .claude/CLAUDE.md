@@ -161,11 +161,13 @@ Your permissions are governed by `.claude/settings.json` (project-level) and `.c
 - **Git push** → denied (manual user push only)
 - **Direct `pip`/`npm`/`poetry add`** → denied (use Makefile targets)
 
-### IA Stack Ownership (GOVERNANCE)
+### IA Stack Ownership (NON-NEGOTIABLE)
 
-- The Claude Code IA stack (`.claude/CLAUDE.md`, `.claude/skills/`) is the authoritative configuration for this runtime.
+- The Claude Code IA stack (all assets under `.claude/`) is governed exclusively by the **`agentic-designer`** agent.
+- **NO agent may edit, create, or delete files under `.claude/`** except via the `agentic-designer` agent template.
 - Category glossaries at `.claude/skills/{category}/SKILL.md` are auto-generated — never hand-edit.
-- For any IA stack modification (skills, categories, routing, rules), load `ia-stack-ops` via the `ia-design` glossary.
+- Runtime enforcement: `ia-stack-guard.sh` hook blocks `.claude/` writes without ia-design context.
+- Delegation: `Task(subagent_type="general-purpose", model="opus")` with `agentic-designer` template.
 
 ---
 
@@ -184,16 +186,32 @@ Use the `Task` tool to delegate work to specialized subagents when appropriate.
 
 > **Effort column**: Recommended thinking effort per `thinking-integration` skill.
 
+**Custom Agent Templates** (`.claude/agents/`):
+
+Structured prompt templates injected into `Task(subagent_type="general-purpose")` calls. Each defines identity, constraints, methodology, tool routing, and output format.
+
+| Agent | Model | Use For | Template |
+|-------|-------|---------|----------|
+| `agentic-designer` | opus | IA stack design, maintenance, audit — **EXCLUSIVE** for `.claude/` | `.claude/agents/agentic-designer.md` |
+| `research` | sonnet | Read-only investigation, evidence gathering | `.claude/agents/research.md` |
+| `verify` | sonnet | Post-implementation verification, falsification-first | `.claude/agents/verify.md` |
+| `implement` | sonnet | Code changes, test execution, diagnostics validation | `.claude/agents/implement.md` |
+| `frontend` | sonnet | Vue 3 UI, UX design, TradingView, Playwright verification | `.claude/agents/frontend.md` |
+| `backend` | sonnet | Python APIs, providers, IB integration, WebSocket, testing | `.claude/agents/backend.md` |
+
 **Delegation Rules**:
 
 | Task Type                                                                  | `subagent_type`                       | Notes                                         |
 | -------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------- |
-| IA stack artifact                                                          | **inline**                            | Load `ia-stack-ops` — never delegate          |
+| IA stack artifact (`.claude/` directory)                                   | `general-purpose` + `model: "opus"`   | Inject `agentic-designer` template — **NON-NEGOTIABLE** |
 | Broad codebase search                                                      | `Explore`                             |                                               |
 | Large-output commands                                                      | `Bash`                                | Inject `command-execution` skill              |
 | Implementation planning                                                    | `Plan` or `EnterPlanMode`             |                                               |
-| Single-file fix                                                            | `general-purpose` + `model: "sonnet"` |                                               |
-| Research / doc gathering                                                   | `general-purpose`                     | Inject `research-methodology` skill           |
+| Frontend (UI, UX, Vue components, TradingView, visual verification)        | `general-purpose` + `model: "sonnet"` | Inject frontend agent template                |
+| Backend (APIs, providers, IB integration, WebSocket, datastores, tests)    | `general-purpose` + `model: "sonnet"` | Inject backend agent template                 |
+| Single-file fix                                                            | `general-purpose` + `model: "sonnet"` | Inject implement agent template               |
+| Research / doc gathering                                                   | `general-purpose`                     | Inject research agent template                |
+| Post-implementation verification                                           | `general-purpose` + `model: "sonnet"` | Inject verify agent template                  |
 | Everything else (features, tests, reviews, debugging, browser, doc-update) | `general-purpose`                     | Default; use `model: "sonnet"` for doc-update |
 
 ---

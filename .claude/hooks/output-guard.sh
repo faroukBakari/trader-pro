@@ -50,10 +50,10 @@ if echo "$CMD" | grep -qE '\bgit\s+log\b'; then
   fi
 fi
 
-# git diff (bare, no --stat/--name-only/--name-status and no path scope after --)
+# git diff (require --stat, --name-only, --name-status, or path scope after --)
 if echo "$CMD" | grep -qE '^\s*git\s+diff\b'; then
-  if ! echo "$CMD" | grep -qE -- '--stat|--name-only|--name-status|--cached|-- '; then
-    echo "Bare git diff can produce large output. Add '--stat' first, then targeted diff." >&2
+  if ! echo "$CMD" | grep -qE -- '--stat|--name-only|--name-status|-- '; then
+    echo "Bare git diff can produce large output. Add '--stat' first, then targeted diff with '-- path'." >&2
     exit 2
   fi
 fi
