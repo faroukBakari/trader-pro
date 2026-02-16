@@ -1,12 +1,12 @@
 ---
 name: vscode-mcp-routing
-description: VS Code MCP tool routing and diagnostics-driven edit loops. Load when choosing between native and MCP workspace tools
+description: VS Code MCP tool routing, diagnostics-driven edit loops, and IDE sub-tool reference. Load when choosing between native and MCP workspace tools or using VS Code IDE features
 user-invocable: false
 ---
 
-# VS Code MCP Tool Routing
+# VS Code Tool Routing & Reference
 
-Routes editing, refactoring, and verification operations between Claude Code native tools and VS Code MCP server tools. Prevents common pitfalls (Write-guard failures, Edit uniqueness issues) by selecting the correct tool for each operation type.
+Routes operations between Claude Code native tools and VS Code MCP server tools. Includes the diagnostics-driven edit loop, move/rename safety, and a compact reference for IDE sub-tools (commands, extensions, browser).
 
 ---
 
@@ -18,6 +18,7 @@ Apply when:
 - Verifying edits before declaring a task complete
 - Scaffolding new files idempotently
 - Choosing between `Edit` vs `replace_lines_code`, or `Bash mv` vs `move_file_code`
+- Running VS Code commands programmatically (format, save, organize imports)
 
 Do NOT use (native tools suffice):
 - Reading files (`Read`), searching files (`Glob`, `Grep`), simple unique-string edits (`Edit`)
@@ -155,8 +156,53 @@ Quick routing without the full methodology:
 | "Creating file that might already exist" | `create_file_code` with `ignoreIfExists: true` |
 | "Need to read a file" | `Read` (never `read_file_code`) |
 | "Need to run a shell command" | `Bash` (never `execute_shell_command_code`) |
+| "Need to run a VS Code command" | `runCommand` with command ID (see IDE reference below) |
 
 </decision_shortcuts>
+
+---
+
+## <ide_sub_tools>
+
+### runCommand — VS Code Command Execution
+
+Executes any VS Code command by ID. Schema: `run_vscode_command({ commandId, name, args })`.
+
+**Useful Command IDs:**
+
+| Category | Command ID | Purpose |
+|----------|-----------|---------|
+| File | `workbench.action.files.save` | Save active file |
+| File | `workbench.action.files.saveAll` | Save all files |
+| Editor | `editor.action.formatDocument` | Format active document |
+| Editor | `editor.action.organizeImports` | Organize imports |
+| Editor | `editor.action.rename` | Rename symbol |
+| Terminal | `workbench.action.terminal.new` | Create new terminal |
+| Testing | `testing.runAll` | Run all tests |
+| Git | `git.stageAll` | Stage all changes |
+| Search | `workbench.action.findInFiles` | Workspace search |
+| Search | `workbench.action.quickOpen` | Quick open file (Ctrl+P) |
+
+### openSimpleBrowser — In-Editor URL Preview
+
+Opens a URL in VS Code's built-in browser panel. Schema: `open_simple_browser({ url })`.
+Use for: dev server preview (`http://localhost:5173`), generated docs, web resources.
+
+### extensions — Marketplace Search
+
+Search VS Code extension marketplace. Schema: `vscode_searchExtensions_internal({ category, keywords, ids })`.
+Use for: finding/recommending extensions, verifying extension existence.
+
+### Other Sub-Tools (niche)
+
+| Sub-Tool | Purpose | When to Use |
+|----------|---------|-------------|
+| `vscodeAPI` | Extension development API docs | Building VS Code extensions only |
+| `installExtension` | Install extension by ID | Project setup, tooling |
+| `newWorkspace` | Scaffold new project | Creating new projects from scratch |
+| `getProjectSetupInfo` | Project setup steps | After `newWorkspace` |
+
+</ide_sub_tools>
 
 ---
 

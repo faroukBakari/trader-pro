@@ -63,6 +63,33 @@ if datastore.has_capability("transactions"):
 
 **`"rangequery"`**: Range query operations via `RangeQueryTableInterface`. When available, `rangequery_table()` returns a table with `get_missing_ranges()` for accurate gap detection using PostgreSQL multirange subtraction. Otherwise, fall back to boundary-based algorithms (which may miss internal gaps).
 
+### Capability Design Guidelines
+
+Capabilities describe **what a datastore can do** (functional contracts), not **how it is implemented** (technology choices). This distinction is critical for maintaining a clean abstraction boundary.
+
+**Rule: Capabilities must be implementation-agnostic.**
+
+Each capability name must map to a concrete interface or behavioral contract that is meaningful to consumers regardless of the underlying storage engine.
+
+| Good (functional) | Bad (implementation-specific) | Why it's wrong |
+|---|---|---|
+| `"timeseries"` | `"inmemory"` | Describes storage mechanism, not consumer-facing behavior |
+| `"persistence"` | `"duckdb"` | Names a specific technology, not a capability |
+| `"transactions"` | `"sql-backed"` | Leaks implementation detail to consumers |
+| `"rangequery"` | `"fast-lookup"` | Performance characteristic, not a contract |
+
+**When NOT to use a datastore capability:**
+
+- **Ephemeral in-process state** (e.g., bracket enrichment caches, session-scoped lookups): Use plain `dict` or in-memory data structures directly. A datastore adds serialization overhead, async ceremony, and unnecessary coupling for data that is process-scoped and does not survive restarts.
+- **Implementation routing** (e.g., "use DuckDB because it's in-memory"): Select datastores by functional need (`"timeseries"`, `"persistence"`), not by implementation identity. If no functional capability is needed, no datastore is needed.
+
+**When to introduce a new capability:**
+
+1. There is a new `*TableInterface` (e.g., `GraphTableInterface`) or behavioral contract
+2. At least two datastore implementations could differ in support for it
+3. Services need to declare a requirement that affects datastore selection
+4. The capability name describes a consumer-visible behavior, not an implementation detail
+
 ---
 
 ## Capability-Based Datastore Selection

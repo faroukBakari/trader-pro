@@ -8,7 +8,7 @@ user-invocable: false
 
 Two-part reference for VS Code `.prompt.md` files: **File Format Specification** (syntax, variables, runtime behavior) and **Design Principles** (philosophy, quality tests, anti-patterns). Based on official VS Code documentation, GitHub best practices, and the three-layer agentic model.
 
-**Scope boundary**: This skill covers `.prompt.md` *file format and design*. For prompt *content* patterns (XML sections, guards), apply `prompting-guide`. For *prompt-level context design* (token budgets, relevance scoping), apply `prompt-context-efficiency`.
+**Scope boundary**: This skill covers `.prompt.md` *file format and design*. For prompt *content* patterns (XML sections, guards), apply `prompting-guide`.
 
 ---
 

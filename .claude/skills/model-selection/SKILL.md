@@ -1,9 +1,7 @@
 ---
 name: model-selection
-description: FinOps-aware model selection for Claude Haiku 4.5, Sonnet 4.5, and Opus 4.6 with verified benchmarks
+description: FinOps-aware model selection for Claude Haiku 4.5, Sonnet 4.5, and Opus 4.6 with verified benchmarks. Load when selecting models for tasks or calibrating cost vs performance
 user-invocable: false
-last-updated: 2026-02-12
-data-sources: [anthropic.com/news, anthropic.com/pricing, artificialanalysis.ai, llm-stats.com]
 ---
 
 # Model Selection Guide — Claude 4.x Family
