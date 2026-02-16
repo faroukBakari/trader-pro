@@ -1,4 +1,6 @@
 ---
+name: verify
+description: Post-implementation verification, falsification-first
 model: sonnet
 tools:
   - Read

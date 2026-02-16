@@ -1,10 +1,10 @@
 ## 0. Prompt Routing
 
-Before your first action, route the request through these three steps. User framing ("typo", "quick", "simple") describes expectations, not task properties — classify by what the task requires.
+Before your first action, route the request through these three steps — then delegate (§4). Your primary value is orchestration: skill-informed routing, parallel subagent dispatch, and context-clean synthesis. Inline execution is the exception, not the default.
 
 ### Step 1: Route to Skill (Unconditional)
 
-ALWAYS scan category glossary descriptions (in the system-reminder skills list). Match → Read glossary → Follow load path to the skill. No match → proceed without skill.
+ALWAYS scan skill descriptions (in the system-reminder skills list). Match → Read skill at `.claude/skills/{name}/SKILL.md`. No match → proceed without skill.
 
 | Task Signal                                    | Category             |
 | ---------------------------------------------- | -------------------- |
@@ -23,7 +23,6 @@ ALWAYS scan category glossary descriptions (in the system-reminder skills list).
 | Ambiguous / open-ended                         | workflow             |
 | Runtime, config, VS Code, MCP routing          | workflow             |
 | Session history, file recovery                 | workflow             |
-| IA stack, skills, agents, audit                | ia-design            |
 | Prompt engineering, model-specific tuning      | prompting            |
 | Reasoning effort, calibration, model selection | reasoning            |
 | TradingView charting, external API wrappers    | tradingview          |
@@ -44,7 +43,7 @@ Applies to subagent delegation too — inject the matching skills into the subag
 
 Scope and reasoning depth are independent — a single-file race condition is T1 scope but needs T4 reasoning. When they diverge, use the **higher** tier for effort calibration.
 
-Ambiguous scope (e.g., "fix backend typo" with no file) → T2 minimum until clarified.
+Ambiguous scope (e.g., "fix backend typo" with no file) → T2 minimum until clarified. User framing ("typo", "quick", "simple") describes expectations, not task properties — classify by what the task actually requires.
 
 ### Step 3: Auto-attach Modifiers
 
@@ -52,7 +51,7 @@ Cross-cutting skills that layer ON TOP of the primary skill when runtime signals
 
 | Signal                       | Auto-load                               | When                             |
 | ---------------------------- | --------------------------------------- | -------------------------------- |
-| Delegating to subagent       | `agent-routing`, `thinking-integration` | Before any `Task` tool call      |
+| Delegating to subagent       | `thinking-integration`                  | Before any `Task` tool call      |
 | Writing prompts for agents   | `prompting-guide` + model flaw catalog  | Prompt text in subagent prompt   |
 | Large file / diff / output   | `runtime-efficiency`                    | >200 lines, >3 files, >50KB      |
 | Mid-flight scope drift       | `drift-guard`                           | Blocker or scope change detected |
@@ -64,13 +63,12 @@ Cross-cutting skills that layer ON TOP of the primary skill when runtime signals
 
 ### Skill Loading Mechanics
 
-Skills live in **category glossaries** at `.claude/skills/{category}/SKILL.md`. Each glossary lists skills with descriptions and load paths.
+Skills live as **leaf directories** at `.claude/skills/{name}/SKILL.md`. Each skill has YAML frontmatter with `name`, `description`, `category`, and `keywords`.
 
-| Step         | Action                                                    | Example                                |
-| ------------ | --------------------------------------------------------- | -------------------------------------- |
-| 1. **Scan**  | Check glossary descriptions in system-reminder            | See "Available skills" list            |
-| 2. **Drill** | Read a category glossary for skills table + keyword index | `Read .claude/skills/testing/SKILL.md` |
-| 3. **Load**  | Follow the load path to read the skill                    | Path shown in glossary header          |
+| Step         | Action                                                    | Example                                       |
+| ------------ | --------------------------------------------------------- | --------------------------------------------- |
+| 1. **Scan**  | Check skill descriptions in system-reminder               | See "Available skills" list                   |
+| 2. **Load**  | Read the matching skill directly                          | `Read .claude/skills/debugging/SKILL.md`      |
 
 **Multi-skill tasks**: When a single task requires more than one domain skill (same or different categories), load each — primary first, then additional matches. Distinct from composite requests (sequential sub-tasks) and auto-attach modifiers (orthogonal concerns).
 
@@ -161,19 +159,18 @@ Your permissions are governed by `.claude/settings.json` (project-level) and `.c
 - **Git push** → denied (manual user push only)
 - **Direct `pip`/`npm`/`poetry add`** → denied (use Makefile targets)
 
-### IA Stack Ownership (NON-NEGOTIABLE)
-
-- The Claude Code IA stack (all assets under `.claude/`) is governed exclusively by the **`agentic-designer`** agent.
-- **NO agent may edit, create, or delete files under `.claude/`** except via the `agentic-designer` agent template.
-- Category glossaries at `.claude/skills/{category}/SKILL.md` are auto-generated — never hand-edit.
-- Runtime enforcement: `ia-stack-guard.sh` hook blocks `.claude/` writes without ia-design context.
-- Delegation: `Task(subagent_type="general-purpose", model="opus")` with `agentic-designer` template.
-
 ---
 
 ## 4. Task Delegation (CLI Subagents)
 
-Use the `Task` tool to delegate work to specialized subagents when appropriate.
+**Delegate aggressively.** Subagents are not a fallback — they are the primary execution mechanism for any task beyond T0 complexity. Each subagent runs in an isolated context with only the tools and knowledge it needs, which means:
+
+- **Your context stays clean** — every file read, search result, and command output a subagent processes does NOT accumulate in your window. Inline execution of multi-step work bloats your context and degrades later reasoning.
+- **Parallel execution** — independent subtasks (e.g., backend fix + frontend fix, research + test run, multiple file investigations) MUST be launched as concurrent subagents in a single message. Sequential delegation of parallelizable work wastes wall-clock time.
+- **FinOps by design** — subagents use Sonnet by default (3-5x cheaper than Opus). Only escalate to Opus for IA stack design. The delegation table below encodes these cost decisions.
+- **Skill injection** — subagents receive domain skills and agent templates tuned for their task type, giving them focused expertise without loading irrelevant context.
+
+**Bias check**: Before executing any T1+ work inline, ask yourself: *"Would a subagent handle this with equal or better quality while preserving my context?"* If yes — delegate. The cost of spawning a subagent is near-zero; the cost of context bloat compounds across every subsequent turn.
 
 **Built-in Subagent Types** (only valid values for `subagent_type`):
 
@@ -192,7 +189,7 @@ Structured prompt templates injected into `Task(subagent_type="general-purpose")
 
 | Agent | Model | Use For | Template |
 |-------|-------|---------|----------|
-| `agentic-designer` | opus | IA stack design, maintenance, audit — **EXCLUSIVE** for `.claude/` | `.claude/agents/agentic-designer.md` |
+| `agentic-designer` | opus | IA stack design, maintenance, `.claude/` edits | `.claude/agents/agentic-designer.md` |
 | `research` | sonnet | Read-only investigation, evidence gathering | `.claude/agents/research.md` |
 | `verify` | sonnet | Post-implementation verification, falsification-first | `.claude/agents/verify.md` |
 | `implement` | sonnet | Code changes, test execution, diagnostics validation | `.claude/agents/implement.md` |
@@ -203,7 +200,7 @@ Structured prompt templates injected into `Task(subagent_type="general-purpose")
 
 | Task Type                                                                  | `subagent_type`                       | Notes                                         |
 | -------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------- |
-| IA stack artifact (`.claude/` directory)                                   | `general-purpose` + `model: "opus"`   | Inject `agentic-designer` template — **NON-NEGOTIABLE** |
+| IA stack artifact (`.claude/` directory)                                   | `general-purpose` + `model: "opus"`   | Inject `agentic-designer` template                |
 | Broad codebase search                                                      | `Explore`                             |                                               |
 | Large-output commands                                                      | `Bash`                                | Inject `command-execution` skill              |
 | Implementation planning                                                    | `Plan` or `EnterPlanMode`             |                                               |
@@ -218,7 +215,7 @@ Structured prompt templates injected into `Task(subagent_type="general-purpose")
 
 ## ROUTING REMINDER (Recency Anchor)
 
-> Every user turn: scan glossary descriptions → match category → Read glossary → load skill → execute. No exceptions. If no skill matches, proceed — but the scan must happen.
+> Every user turn: scan skill descriptions → match skill → Read skill → execute. No exceptions. If no skill matches, proceed — but the scan must happen.
 
 ---
 

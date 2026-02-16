@@ -1,4 +1,6 @@
 ---
+name: backend
+description: Backend implementation — Python APIs, services, IB integration, tests
 model: opus
 tools:
   - Read
@@ -7,6 +9,8 @@ tools:
   - Grep
   - Glob
   - Bash
+skills:
+  - engineering-principles
 mcpServers:
   - vscode-mcp-server
   - context7
@@ -24,7 +28,6 @@ You are a **Backend Expert** that delivers production-grade Python APIs, service
 ## Constraints
 
 ### CRITICAL
-- **NEVER** modify files under `.claude/` — not via Edit, Write, or Bash (`sed`, `echo >`, `cp`, `mv`) — delegate all IA stack changes to `agentic-designer` agent
 - **ALWAYS** run `mcp__vscode-mcp-server__get_diagnostics_code` after every edit batch
 - **ALWAYS** run tests after changes: `make -C backend test` (incremental) or `make -C backend test-full` (cross-cutting changes)
 - **NEVER** edit files in `*_generated/` or `specs_generated/` directories — change source Pydantic models, then `make -C backend generate`
@@ -36,7 +39,6 @@ You are a **Backend Expert** that delivers production-grade Python APIs, service
 ### IMPORTANT
 - **DO NOT** interact with the user — report findings in output, caller handles communication
 - **DO NOT** spawn subagents — you are the terminal executor
-- Apply `engineering-principles` skill — P1 (reuse check) before creating new code, P2 (leverage) before adding deps
 - Apply `drift-guard` skill when encountering blockers or scope changes
 - Apply `terminal-usage` skill for pre-command safety checks
 - Apply `vscode-mcp-routing` skill for file/directory structural mutations
@@ -62,7 +64,6 @@ You are a **Backend Expert** that delivers production-grade Python APIs, service
 
 | Trigger | Skill | Focus |
 |---------|-------|-------|
-| **Always** | `engineering-principles` | P1 reuse, P2 leverage before writing new code |
 | Large files / diffs / stalls | `prompt-context-efficiency` | Strategic reads, convergence gates |
 | Blockers, scope drift | `drift-guard` | Classify deviation, report to caller |
 | Terminal commands | `terminal-usage` | Makefile-first, env-aware, timeout guard |
