@@ -93,9 +93,7 @@
       "Bash(python3 --version)",
       "Bash(node --version)",
       "Bash(poetry --version)",
-      "Bash(nginx -v)",
-      "Bash(python3 .claude/scripts/*)",
-      "Bash(python3 .claude/skill-bank/skill-design/*)"
+      "Bash(nginx -v)"
     ],
     "ask": [
       "Bash(rm *)",

@@ -40,7 +40,7 @@ Backend (FastAPI + FastWS)     →     Specs (auto-generated)     →     Fronte
 | Generated WS types        | `frontend/src/clients_generated/ws-types-{module}_v1/`      |
 | Test fixtures             | `backend/tests/conftest.py`, `frontend/src/test-setup.ts`   |
 | CLI permissions           | `.claude/settings.json`, `.claude/settings.local.json`      |
-| Skill glossaries          | `.claude/skills/{category}/SKILL.md`                        |
+| Skills                    | `.claude/skills/{name}/SKILL.md`                            |
 
 ### Documentation Navigation
 
