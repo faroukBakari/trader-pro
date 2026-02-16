@@ -83,7 +83,7 @@ class BarRepository:
             ts_table = self._get_timeseries_table(symbol, resolution)
             return await ts_table.set_batch(bars)  # Efficient bulk INSERT
 
-        # Fallback for InMemoryDatastore
+        # Fallback for datastores without timeseries support
         table = self._get_bar_table(symbol, resolution)
         for bar in bars:
             await table.set(str(bar.time), bar)
@@ -93,7 +93,7 @@ class BarRepository:
 **Key Points:**
 
 - Uses `TimeSeriesTableInterface` for PostgreSQL (via `has_timeseries` check)
-- Falls back to `TableInterface` for InMemoryDatastore (no time-series support)
+- Falls back to `TableInterface` for datastores without time-series support
 - Table naming convention: `bars_{symbol}_{resolution}` (e.g., `bars_aapl_1d`)
 - `get_time_range()` for efficient B-tree range scans, `set_batch()` for bulk inserts
 - Supports cleanup via `drop_if_empty()` using `datastore.drop_table()`
@@ -103,13 +103,13 @@ class BarRepository:
 The `BarCacheManager` provides intelligent cache metadata tracking for historical bars:
 
 ```python
-from trading_api.datastores import InMemoryDatastore
+from trading_api.datastores import create_memory_datastore
 from trading_api.modules.datafeed.bar_cache_manager import BarCacheManager
 from trading_api.models.market import TimeRange
 from trading_api.shared.config import Settings
 
 # Initialize via async factory (required pattern)
-datastore = InMemoryDatastore()
+datastore = create_memory_datastore()
 settings = Settings()  # Uses BAR_CACHE_PENDING_TTL_MS config
 manager = await BarCacheManager.create(datastore=datastore, settings=settings)
 
@@ -208,7 +208,7 @@ The `DatafeedService.get_bars()` method implements read-through cache orchestrat
 
 ```python
 # In get_bars()
-logger.info(f"[CACHE BYPASS] {symbol}/{resolution} - no cache manager")  # InMemoryDatastore
+logger.info(f"[CACHE BYPASS] {symbol}/{resolution} - no cache manager")  # No cache support
 logger.info(f"[CACHE HIT] {symbol}/{resolution} - full coverage found")
 logger.info(f"[CACHE MISS] {symbol}/{resolution} - {len(missing_ranges)} gaps found")
 logger.info(f"[PENDING ACQUIRED] {symbol}/{resolution} gap {start}->{end} - fetching...")
@@ -225,13 +225,13 @@ logger.info(f"[PENDING BLOCKED] {symbol}/{resolution} gap {start}->{end} - waiti
 **Capability Requirements:**
 
 - Cache orchestration requires `PostgresDatastore` (exclusion constraints for pending ranges)
-- Falls back to direct provider calls with `InMemoryDatastore` (no caching)
+- Falls back to direct provider calls when cache manager unavailable (no caching)
 
 **Test Coverage** (`test_api_integration.py::TestGetBarsCaching`):
 
 | Test                                        | Scenario                                        |
 | ------------------------------------------- | ----------------------------------------------- |
-| `test_cache_bypass_with_inmemory_datastore` | InMemoryDatastore → no caching, provider called |
+| `test_cache_bypass_with_duckdb_datastore` | DuckDBDatastore → no caching, provider called |
 | `test_cache_miss_fetches_and_stores`        | Cache miss → provider fetch → store             |
 | `test_cache_hit_skips_provider`             | Cache hit → no provider call                    |
 | `test_partial_cache_fills_gaps_only`        | Partial coverage → fetch gaps only              |

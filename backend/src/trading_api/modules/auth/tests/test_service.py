@@ -16,7 +16,7 @@ from trading_api.shared.config import settings
 @pytest.fixture
 async def auth_service() -> AuthService:
     """Fixture providing auth service with provider injection"""
-    from trading_api.datastores import InMemoryDatastore
+    from trading_api.datastores import create_memory_datastore
     from trading_api.models.providers.google_oauth_configs import GoogleProviderConfig
     from trading_api.providers.google import GoogleProvider
 
@@ -25,7 +25,7 @@ async def auth_service() -> AuthService:
     google_provider = GoogleProvider(config=google_config)
 
     # Create datastore for service
-    datastore = InMemoryDatastore()
+    datastore = create_memory_datastore()
 
     # Create auth service with provider and datastore
     return AuthService(

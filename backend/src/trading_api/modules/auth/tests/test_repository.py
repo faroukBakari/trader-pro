@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from trading_api.datastores import InMemoryDatastore
+from trading_api.datastores import create_memory_datastore
 from trading_api.modules.auth.repository import RefreshTokenRepository, UserRepository
 from trading_api.modules.auth.tests.conftest import DeviceInfoFactory, UserCreateFactory
 
@@ -15,7 +15,7 @@ class TestUserRepository:
         """Fixture providing repository instance with indexes configured at construction."""
         from trading_api.modules.auth.repository import UserRepository
 
-        return UserRepository(datastore=InMemoryDatastore())
+        return UserRepository(datastore=create_memory_datastore())
 
     @pytest.mark.asyncio
     async def test_create_user(self, repository: UserRepository) -> None:
@@ -182,7 +182,7 @@ class TestRefreshTokenRepository:
         """Fixture providing repository instance with indexes configured at construction."""
         from trading_api.modules.auth.repository import RefreshTokenRepository
 
-        return RefreshTokenRepository(datastore=InMemoryDatastore())
+        return RefreshTokenRepository(datastore=create_memory_datastore())
 
     @pytest.mark.asyncio
     async def test_store_token(self, repository: RefreshTokenRepository) -> None:

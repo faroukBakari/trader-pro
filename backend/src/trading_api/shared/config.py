@@ -40,6 +40,9 @@ class Settings(BaseSettings):
         30.0  # Total timeout for initial connection
     )
 
+    # DuckDB Datastore Configuration
+    DATASTORE_DUCKDB_PATH: str = ":memory:"
+
     BAR_CACHE_PENDING_TTL_MS: int = 30_000
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

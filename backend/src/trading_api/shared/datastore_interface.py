@@ -22,7 +22,7 @@ from sqlmodel import SQLModel
 from trading_api.models.common import DatastoreCapabilitySpec
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -245,20 +245,20 @@ class TimeSeriesTableInterface(TableInterface[T], ABC):
     @abstractmethod
     async def set_batch(
         self,
-        values: list[T],
+        values: "Sequence[T]",
         session: "AsyncSession | None" = None,
     ) -> int:
-        """Bulk upsert values using batch INSERT...ON CONFLICT.
+        """Bulk upsert values, replacing any existing rows with matching keys.
 
-        Efficiently stores multiple values in a single database roundtrip.
-        Uses PostgreSQL's INSERT ... ON CONFLICT DO UPDATE for upsert semantics.
+        Stores multiple values efficiently with upsert semantics:
+        existing keys are updated, new keys are inserted.
 
         Args:
-            values: List of model instances to upsert
+            values: Sequence of model instances to upsert
             session: Optional external session for transaction batching
 
         Returns:
-            Number of values processed (note: doesn't distinguish inserts vs updates)
+            Number of NEW rows inserted (excludes updates to existing keys)
         """
 
 
@@ -306,7 +306,7 @@ class DatastoreInterface(ABC):
     """Abstract interface for datastore with transaction support.
 
     Implementations:
-    - InMemoryDatastore: Dict-based storage for MVP/testing
+    - DuckDBDatastore: SQL-backed storage for prototyping/testing (`:memory:` mode)
     - PostgresDatastore: psycopg pool-based (Wave 2+)
     """
 
@@ -326,7 +326,7 @@ class DatastoreInterface(ABC):
             >>> datastore.has_capability("persistence")
             True
             >>> datastore.has_capability("timeseries")
-            False  # for InMemoryDatastore
+            True  # for DuckDB and PostgreSQL
         """
         return any(cap.name == name for cap in self.capabilities())
 
@@ -386,13 +386,13 @@ class DatastoreInterface(ABC):
         """Canonical name for registry lookup.
 
         Override in subclasses if the default (lowercase class prefix) is not desired.
-        E.g., InMemoryDatastore → "inmemory", PostgresDatastore → "postgres"
+        E.g., DuckDBDatastore → "duckdb", PostgresDatastore → "postgres"
 
         Returns:
             str: Datastore name used by DatastoreRegistry
         """
         # Default: strip "Datastore" suffix and lowercase
-        # InMemoryDatastore → "inmemory"
+        # DuckDBDatastore → "duckdb"
         name = cls.__name__.removesuffix("Datastore")
         return name.lower()
 
@@ -474,7 +474,7 @@ class DatastoreInterface(ABC):
 
         Queries the datastore for existing tables. For PostgreSQL, this queries
         information_schema to find dynamically-created tables (e.g., bar tables).
-        For InMemory, this returns keys from the internal tables dict.
+        For DuckDB :memory:, this queries the in-memory database catalog.
 
         Args:
             prefix: Optional prefix filter (e.g., "bars_" to list only bar tables)
@@ -490,7 +490,7 @@ class DatastoreInterface(ABC):
 
         Removes the table from the datastore and unregisters it from internal tracking.
         For PostgreSQL, executes DROP TABLE IF EXISTS.
-        For InMemory, removes from the internal tables dict.
+        For DuckDB, drops the table from the in-memory database catalog.
 
         Args:
             name: Table name to drop

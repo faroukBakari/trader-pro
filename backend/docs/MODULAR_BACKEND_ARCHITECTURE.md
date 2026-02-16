@@ -991,8 +991,8 @@ Modules are **lazy-loaded** only when needed:
 registry.register(BrokerModule, "broker")
 
 # Instance created on first access
-from trading_api.datastores import InMemoryDatastore
-datastore = InMemoryDatastore()
+from trading_api.datastores import create_memory_datastore
+datastore = create_memory_datastore()
 modules = registry.get_modules(
     module_names=["broker"],  # Empty list [] = all modules
     providers=[...],
@@ -1050,7 +1050,7 @@ The modular architecture integrates a **pluggable provider/capability system** f
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                              AppFactory                                  │
 │  ┌────────────────────┐ ┌────────────────────┐ ┌────────────────────┐  │
-│  │  ModuleRegistry    │ │ ProviderRegistry   │ │ InMemoryDatastore  │  │
+│  │  ModuleRegistry    │ │ ProviderRegistry   │ │ DuckDBDatastore    │  │
 │  │  - auto_discover() │ │ - auto_discover()  │ │ - table(model)     │  │
 │  │  - get_modules()   │ │ - get_providers()  │ │ - async CRUD       │  │
 │  └────────────────────┘ └────────────────────┘ └────────────────────┘  │
@@ -2625,7 +2625,7 @@ def broker_app() -> ModularApp:
     # Discover specific modules/providers
     module_registry.auto_discover(enabled_modules=["broker"])
     provider_registry.auto_discover(enabled_names=["fakebroker"])
-    datastore_registry.auto_discover(enabled_names=["inmemory"])
+    datastore_registry.auto_discover(enabled_names=["duckdb"])
 
     # Create instances synchronously for test control
     loop = asyncio.get_event_loop()

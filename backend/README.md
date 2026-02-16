@@ -51,7 +51,7 @@ The system includes a JWT-based authentication module providing secure, stateles
 
 ✅ All broker and datafeed endpoints require authentication  
 ✅ Type-safe JWT payload with `UserData` model  
-✅ In-memory storage (MVP) with PostgreSQL/Redis migration path  
+✅ DuckDB storage (prototyping) with PostgreSQL migration path
 ✅ Comprehensive test coverage (92 tests, 100% passing)  
 ✅ Independent module (follows standard modular pattern)
 

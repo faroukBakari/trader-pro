@@ -2,7 +2,7 @@
 Datafeed repository interfaces and implementations.
 
 This module defines the repository pattern for bar storage,
-enabling pluggable storage backends (in-memory, PostgreSQL, etc.).
+enabling pluggable storage backends (DuckDB, PostgreSQL, etc.).
 
 [ARCHITECTURE] Bar storage uses:
 - Dynamic SQLModel tables per symbol/resolution (bars_{symbol}_{resolution})
@@ -122,7 +122,7 @@ class BarRepository:
             ts_table = self._get_timeseries_table(symbol, resolution)
             return await ts_table.set_batch(bars)
 
-        # Fallback for InMemoryDatastore - count only new inserts
+        # Fallback for datastores without timeseries support - count only new inserts
         table = self._get_bar_table(symbol, resolution)
         stored_count = 0
         for bar in bars:
@@ -151,7 +151,7 @@ class BarRepository:
             ts_table = self._get_timeseries_table(symbol, resolution)
             return await ts_table.get_time_range(from_time, to_time)
 
-        # Fallback for InMemoryDatastore - load and filter
+        # Fallback for datastores without timeseries support - load and filter
         table = self._get_bar_table(symbol, resolution)
         all_bars = await table.values()
         filtered_bars = [bar for bar in all_bars if from_time <= bar.time <= to_time]

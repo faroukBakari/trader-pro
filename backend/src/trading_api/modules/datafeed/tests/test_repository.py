@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from trading_api.datastores import InMemoryDatastore
+from trading_api.datastores import create_memory_datastore
 from trading_api.datastores.postgres import PostgresDatastore
 from trading_api.models.market import Bar, Resolution
 from trading_api.modules.datafeed.repository import BarRepository
@@ -48,7 +48,7 @@ class TestBarRepository:
     @pytest.fixture
     def repository(self) -> BarRepository:
         """Fixture providing clean repository instance."""
-        return BarRepository(datastore=InMemoryDatastore())
+        return BarRepository(datastore=create_memory_datastore())
 
     @pytest.mark.asyncio
     async def test_store_and_get_single_bar(self, repository: BarRepository) -> None:
@@ -83,6 +83,7 @@ class TestBarRepository:
         assert result[0].close == bar.close
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(30)
     async def test_store_1000_bars_roundtrip(self, repository: BarRepository) -> None:
         """Test storing and retrieving 1000 bars (Step 4.1)."""
         bars = create_test_bars(count=1000)

@@ -138,7 +138,7 @@ def isolated_broker_app() -> ModularApp:
     # Auto-discover with specific filtering
     module_registry.auto_discover(enabled_modules=["broker"])
     provider_registry.auto_discover(enabled_names=["fakebroker"])  # Use fake provider
-    datastore_registry.auto_discover(enabled_names=["inmemory"])
+    datastore_registry.auto_discover(enabled_names=["duckdb"])
 
     # Create instances synchronously
     loop = asyncio.get_event_loop()
@@ -614,8 +614,8 @@ backend/
 │   ├── test_datastore_contract.py      # Contract tests (ALL implementations)
 │   └── test_datastore_integration.py   # Repository integration tests
 └── src/trading_api/datastores/
-    ├── inmemory/tests/
-    │   └── test_inmemory_specific.py   # InMemory-specific tests
+    ├── duckdb/tests/
+    │   └── test_duckdb_datastore.py    # DuckDB-specific tests
     └── postgres/tests/
         └── test_postgres_specific.py   # Postgres-specific tests
 ```
@@ -633,7 +633,7 @@ Contract tests use a parametrized `any_datastore` fixture to run against all imp
 ```python
 @pytest.fixture(
     params=[
-        pytest.param("inmemory", id="inmemory"),
+        pytest.param("duckdb", id="duckdb"),
         pytest.param(
             "postgres",
             id="postgres",
@@ -643,12 +643,12 @@ Contract tests use a parametrized `any_datastore` fixture to run against all imp
 )
 async def any_datastore(
     request: pytest.FixtureRequest,
-    inmemory_datastore: DatastoreInterface,
+    duckdb_datastore: DatastoreInterface,
     postgres_datastore: DatastoreInterface | None,
 ) -> AsyncIterator[DatastoreInterface]:
     """Parametrized fixture providing each datastore implementation."""
-    if request.param == "inmemory":
-        yield inmemory_datastore
+    if request.param == "duckdb":
+        yield duckdb_datastore
     elif request.param == "postgres":
         if postgres_datastore is None:
             pytest.skip("PostgreSQL not available")
@@ -673,17 +673,17 @@ async def table(any_datastore: DatastoreInterface) -> AsyncIterator[TableInterfa
 #### Running Datastore Tests
 
 ```bash
-# All contract tests (InMemory + Postgres)
+# All contract tests (DuckDB + Postgres)
 cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v
 
-# InMemory only (fast)
-cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v -k inmemory
+# DuckDB only (fast)
+cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v -k duckdb
 
 # Postgres only (requires testcontainers)
 cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v -k postgres -m integration
 
 # Implementation-specific tests
-cd backend && poetry run pytest src/trading_api/datastores/inmemory/tests/ -v
+cd backend && poetry run pytest src/trading_api/datastores/duckdb/tests/ -v
 cd backend && poetry run pytest src/trading_api/datastores/postgres/tests/ -v -m integration
 ```
 
@@ -3942,7 +3942,7 @@ pytest -m "not slow"      # Skip slow tests
 - `session_backend_manager` - Multi-process backend for integration tests
 - `session_test_config` - Test configuration
 
-> **Note**: All fixtures require `InMemoryDatastore` injection. The `no_modules_app` fixture was removed.
+> **Note**: All fixtures require `DuckDBDatastore` injection. The `no_modules_app` fixture was removed.
 
 **Function-scoped (per test):**
 

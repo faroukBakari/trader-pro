@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from trading_api.datastores import InMemoryDatastore
+from trading_api.datastores import create_memory_datastore
 from trading_api.models import Bar
 from trading_api.models.exceptions import ProviderException, ServiceException
 from trading_api.models.market.quotes import QuoteValues
@@ -37,7 +37,7 @@ def mock_provider() -> MockDatafeedProvider:
 def service(mock_provider: MockDatafeedProvider) -> DatafeedService:
     """Create DatafeedService with mock provider."""
     module_dir = Path(__file__).parent.parent
-    datastore = InMemoryDatastore()
+    datastore = create_memory_datastore()
     return DatafeedService(
         module_dir, providers=[mock_provider], datastores=[datastore]
     )
