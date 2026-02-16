@@ -1,61 +1,130 @@
 ---
 name: prompt-interaction-design
-description: VS Code ask_questions tool patterns for agent prompts. Load when designing prompts that gather user input via widgets
+description: Structured user input gathering via ask_questions — decision flowchart, component patterns, inference heuristics. Load when facing vague instructions or designing prompts that gather user input
 user-invocable: false
 ---
 
-# Interactive Component Patterns
+# Interactive Prompt Design
 
-Apply these patterns when designing agent prompts that need structured user input. **Always use the VS Code native `ask_questions` tool** — it provides real quick-pick widgets that return structured JSON.
-
-For the full `ask_questions` tool contract (schema, response format, hard constraints), apply the **`vscode-integration`** skill § `askQuestions`.
+Structured decision-making and component patterns for gathering user input via the `ask_questions` tool. Covers **when** to ask (decision flowchart + inference heuristics) and **how** to ask (component patterns + design rules).
 
 ---
 
-## Available Components
+## Phase 0: Should I Ask?
 
-| Component | Config | Best For | Example |
-|-----------|--------|----------|---------|
-| **Single-Select** | `multiSelect: false` (default) | Either/or decisions, approach selection | "Which pattern?" |
-| **Multi-Select** | `multiSelect: true` | Feature toggles, priority selection | "Which areas?" |
-| **Free Text** | `allowFreeformInput: true` | Names, custom values, explanations | "Project name?" |
-| **Free Text Only** | `options: []` (empty array) | Open-ended input with no presets | "Describe the issue" |
-| **Recommended** | `recommended: true` on one option | Guide toward best practices | Default approach |
+### Decision Flowchart
 
----
+```
+Is the task type obvious from the request?
+   NO  → Ask via ask_questions
+   YES → Infer and proceed
 
-## When to Use Interactive Components
+Is scope/complexity explicitly stated?
+   NO  → Ask or infer from context
+   YES → Use stated scope
 
-Use `ask_questions` when:
-- Task has multiple valid approaches (let user choose)
-- User preferences significantly affect outcome
-- 2+ independent decisions needed (batch into one call)
-- Clarifying questions would improve quality
-- Scope or target is ambiguous
+Are focus areas mentioned or implied?
+   NO  → Ask multi-select for priorities
+   YES → Include mentioned areas + sensible defaults
 
-**Do NOT use** when:
+Rule: If 2+ areas unclear → batch into one ask_questions call
+      If 1 unclear → infer default, note assumption explicitly
+```
+
+### Inference Heuristics
+
+When keywords strongly signal intent, infer rather than ask:
+
+| Signal Words | Likely Intent | Confidence |
+|---|---|---|
+| "bug", "broken", "failing", "error" | Fix/Debug | High |
+| "refactor", "improve", "clean up" | Refactoring | High |
+| "add", "implement", "new", "create" | New feature | High |
+| "should we", "compare", "evaluate", "which" | Decision/Analysis | High |
+| "quick", "brief", "just" | Minimal scope | Medium |
+| "thorough", "comprehensive", "deep" | Full scope | Medium |
+
+**Rule**: High confidence → proceed. Medium confidence → note assumption.
+
+### Trigger Conditions
+
+| Phase | Trigger | Component Type |
+|---|---|---|
+| **Start** | Ambiguous scope (2+ unclear areas) | Multi-question `ask_questions` call |
+| **Options** | 2+ viable approaches exist | Single-select with trade-offs |
+| **Next Steps** | Path forward unclear | Single-select for action |
+
+### When NOT to Ask
+
 - Intent is obvious from context (infer instead)
 - User already clarified in previous messages
 - Only one viable approach exists
 
 ---
 
-## Interaction Rules
+## Component Reference
 
-1. **Batch** related questions into a single `ask_questions` call (max 4)
-2. **Mark one** option as `recommended` with justification in `description`
-3. **Multi-select** for additive choices ("which features"); single-select for either/or ("which approach")
-4. **Headers** ≤12 chars — they're both UI labels and JSON response keys
-5. **Summarize** user choices in a markdown table after receiving response
-6. **Proceed** with implementation — do not re-ask unless requirements change
+### Available Components
+
+| Component | Config | Best For |
+|---|---|---|
+| **Single-Select** | `multiSelect: false` (default) | Either/or decisions, approach selection |
+| **Multi-Select** | `multiSelect: true` | Feature toggles, priority selection |
+| **Free Text** | `allowFreeformInput: true` | Names, custom values, explanations |
+| **Free Text Only** | `options: []` (empty array) | Open-ended input with no presets |
+| **Recommended** | `recommended: true` on one option | Guide toward best practices |
+
+### askQuestions Schema
+
+```
+ask_questions({
+  questions: [                      // 1-4 questions per call
+    {
+      header: "string",             // <=12 chars — UI label AND response key (REQUIRED)
+      question: "string",           // Full question text (REQUIRED)
+      multiSelect: boolean,         // true = checkboxes, false = single-select (default: false)
+      allowFreeformInput: boolean,  // true = user can type custom text (default: false)
+      options: [                    // 0-6 options; omit/empty = free text input only
+        {
+          label: "string",          // Option text (REQUIRED)
+          description: "string",    // Secondary text shown below label (optional)
+          recommended: boolean      // Pre-selects option, shows recommended badge (optional)
+        }
+      ]
+    }
+  ]
+})
+```
+
+### Response Format
+
+```json
+{
+  "answers": {
+    "<header>": {
+      "selected": ["Label A", "Label B"],
+      "freeText": "user typed text or null",
+      "skipped": false
+    }
+  }
+}
+```
+
+### Hard Constraints
+
+| Parameter | Limit | Failure Mode |
+|---|---|---|
+| `header` | <=12 characters | **Validation error** — tool call fails |
+| `questions` | 1-4 per call | **Validation error** — tool call fails |
+| `options` | 0-6 per question | **Validation error** — tool call fails |
+| `recommended` | Max 1 per question | UX confusion — multiple pre-selected |
+| `recommended` | **NEVER** on quiz/poll options | Reveals answer — pre-selects it |
 
 ---
 
 ## Design Patterns
 
 ### Pattern: Pre-Implementation Gathering
-
-Use when a task has multiple valid approaches or configurations:
 
 ```
 ask_questions({
@@ -84,8 +153,6 @@ ask_questions({
 
 ### Pattern: Feature Selection
 
-Use when user needs to pick from a set of additive options:
-
 ```
 ask_questions({
   questions: [
@@ -106,8 +173,6 @@ ask_questions({
 
 ### Pattern: Named Input
 
-Use when you need a user-provided name or custom value:
-
 ```
 ask_questions({
   questions: [
@@ -126,8 +191,6 @@ ask_questions({
 
 ### Pattern: Free Text Only
 
-Use when no presets make sense — user must describe in their own words:
-
 ```
 ask_questions({
   questions: [
@@ -141,12 +204,23 @@ ask_questions({
 
 ---
 
+## Interaction Rules
+
+1. **Batch** related questions into a single `ask_questions` call (max 4)
+2. **Mark one** option as `recommended` with justification in `description`
+3. **Multi-select** for additive choices ("which features"); single-select for either/or ("which approach")
+4. **Headers** <=12 chars — they're both UI labels and JSON response keys
+5. **Summarize** user choices in a markdown table after receiving response
+6. **Proceed** with implementation — do not re-ask unless requirements change
+
+---
+
 ## Trigger Keywords
 
 | User Says | Response Strategy |
-|-----------|-------------------|
+|---|---|
 | "help me decide", "choose between" | Single-select with trade-offs |
-| "set up", "configure", "initialize" | Multi-question wizard (2–4 questions) |
+| "set up", "configure", "initialize" | Multi-question wizard (2-4 questions) |
 | "implement", "create" (ambiguous scope) | Clarify scope and approach |
 | "refactor", "migrate", "upgrade" | Gather constraints and priorities |
 | Multiple items listed ("X, Y, and Z") | Multi-select for prioritization |
@@ -155,11 +229,13 @@ ask_questions({
 
 ## Anti-Patterns
 
-- ❌ Markdown-formatted questions instead of `ask_questions` tool
-- ❌ One question per call when multiple are related (batch them)
-- ❌ `header` longer than 12 characters (causes validation error)
-- ❌ More than 6 options (decision fatigue)
-- ❌ `recommended: true` on quiz/poll answers (reveals the answer)
-- ❌ Re-asking after user already clarified
-- ❌ Asking when intent is obvious from context
-- ❌ Missing "do nothing" / "skip" option for optional changes
+| Don't | Do Instead |
+|---|---|
+| Markdown-formatted questions instead of `ask_questions` tool | Always use `ask_questions` for structured input |
+| One question per call when multiple are related | Batch into one call (max 4) |
+| `header` longer than 12 characters | Keep short — causes validation error |
+| More than 6 options per question | Reduce — causes decision fatigue |
+| `recommended: true` on quiz/poll answers | Reveals the answer — pre-selects it |
+| Re-asking after user already clarified | Proceed with stated preference |
+| Asking when intent is obvious from context | Infer from signal words and proceed |
+| Missing "do nothing" / "skip" option for optional changes | Always include opt-out for non-mandatory decisions |

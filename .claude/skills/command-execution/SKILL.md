@@ -1,29 +1,67 @@
 ---
 name: command-execution
-description: Guarded terminal execution with pre-flight validation and timeouts. Load when delegating commands to Bash subagents
+description: Terminal command safety, delegation routing, and guarded execution. Load when running shell commands or delegating to Bash subagents
 user-invocable: false
 ---
 
 # Command Execution
 
-Guarded terminal execution methodology for Claude Code CLI. Provides a **pre-flight validation layer** (command guards) that makes Bash subagent delegation safe for auto-approve. Every command passes through guards before execution — no exceptions.
+Terminal command safety and guarded execution for Claude Code CLI. Covers both **direct execution** (quick commands run inline) and **delegated execution** (commands dispatched to Bash subagents with full pre-flight validation).
 
 ---
 
 ## <when_to_use>
 
 Apply when:
+- About to run any terminal command (direct or delegated)
+- Deciding whether to run a command directly or delegate
 - Delegating command execution to `Task(subagent_type="Bash")`
 - Running multi-command batches (parallel or sequential)
 - Executing commands with expected large output (>50KB)
-- Managing daemon lifecycle (start → observe → stop)
-- Any command that would benefit from structured pre-flight validation
-
-Do NOT use (run inline instead):
-- Single command with small output (<5KB), command already known
-- Quick inspection: `ls`, `git status`, `git diff --stat`
+- Managing daemon lifecycle (start, observe, stop)
 
 </when_to_use>
+
+---
+
+## <routing>
+
+### When to Run Directly (parent agent)
+
+- Single command with predictable, small output (<5KB)
+- Parent already knows the exact command — no discovery needed
+- Quick inspection: `ls`, `cat`, `git status`, `make -C backend test`
+
+### When to Delegate to Bash Subagent
+
+Delegate via `Task(subagent_type="Bash")` with this skill's methodology. The subagent runs command guards (G1-G5) for safe, auto-approved execution.
+
+| Signal | Why Delegate |
+|--------|-------------|
+| Expected output >5KB | Keeps parent context clean — executor summarizes findings |
+| 3+ commands to run | Parallelization and batch cleanup value |
+| Daemon/server lifecycle | Reliable start, capture, kill lifecycle management |
+| Large build output | Timeout enforcement + post-capture extraction |
+| Command requires Makefile discovery | Only if parent doesn't already know the target |
+
+### Routing Decision Tree
+
+```
+Single command, output <5KB, command known?
+  YES → Run directly (apply pre-command checks below)
+  NO  ↓
+Multiple commands needing parallel execution?
+  YES → Delegate: Task(subagent_type="Bash") + command-execution skill
+  NO  ↓
+Expected output >5KB or needs post-capture extraction?
+  YES → Delegate: Task(subagent_type="Bash") + command-execution skill
+  NO  ↓
+Daemon lifecycle (start, observe, kill)?
+  YES → Delegate: Task(subagent_type="Bash") + command-execution skill
+  NO  → Run directly
+```
+
+</routing>
 
 ---
 
@@ -64,12 +102,12 @@ COMMAND GUARD — Pre-Flight Checklist
 │
 ├── G4. TIMEOUT ENFORCEMENT
 │   Every command MUST have a timeout.
-│   | Command Type            | Timeout   |
-│   |-------------------------|-----------|
-│   | File reads, git ops     | 30s       |
+│   | Command Type              | Timeout |
+│   |---------------------------|---------|
+│   | File reads, git ops       | 30s     |
 │   | Tests, incremental builds | 120s    |
-│   | Clean builds, installs  | 300s      |
-│   | Docker builds           | 600s      |
+│   | Clean builds, installs    | 300s    |
+│   | Docker builds             | 600s    |
 │   Rule: 2-3x estimated duration. Always use `2>&1`.
 │   NO TIMEOUT → ADD ONE before execution.
 │
@@ -113,7 +151,7 @@ Classify the invocation to select the execution path:
 
 ### Phase 2: Guarded Execution
 
-**Run command guards (G1–G5) for EVERY command. No exceptions.**
+**Run command guards (G1-G5) for EVERY command. No exceptions.**
 
 For each command that passes guards:
 
@@ -229,11 +267,13 @@ Context: verify backend starts cleanly after config change
 |-------|------------|
 | Skip command guards for "obvious" commands | Run guards G1-G5 for every command — no exceptions |
 | `npm run build` (bare command) | `make -C frontend build` (env-aware wrapper) |
-| Execute without timeout | Always set timeout per Phase 2 table |
+| Execute without timeout | Always set timeout per G4 table |
 | Pipe during execution (`cmd \| head -50`) | Capture full output, extract post-execution |
 | Guess a `make` target name | Search Makefiles to verify target exists |
 | Run denied commands and ask forgiveness | Check denylist first — refuse immediately |
 | Modify files or write code | You are an executor, not an implementer |
 | Ignore exit codes | Check `$?`: 0=success, 124=timeout, other=failure |
+| Delegate a simple `make test` | Run directly — delegation overhead exceeds value |
+| Run 5 parallel commands manually in parent | Delegate — executor handles parallel launch + batch cleanup |
 
 </anti_patterns>
