@@ -1,24 +1,26 @@
 """Datastore abstractions for persistence layer.
 
 Provides a minimal interface for data storage that can be swapped
-between in-memory (MVP) and PostgreSQL (Wave 2+) implementations.
+between DuckDB (prototyping / in-memory) and PostgreSQL (production).
 
 Directory structure follows registry pattern:
   datastores/
   ├── __init__.py           # Re-exports (backward compat)
-  ├── inmemory/             # InMemoryDatastore implementation
+  ├── _utils.py             # Shared utilities (extract_indexes)
+  ├── duckdb/               # DuckDBDatastore implementation
   │   ├── __init__.py
   │   └── tests/
-  ├── postgres/             # PostgresDatastore implementation (Wave 2A)
+  ├── postgres/             # PostgresDatastore implementation
   │   ├── __init__.py
   │   └── tests/
   └── README.md
 """
 
-from .inmemory import InMemoryDatastore
+from .duckdb import DuckDBDatastore, create_memory_datastore
 from .postgres import PostgresDatastore
 
 __all__ = [
-    "InMemoryDatastore",
+    "DuckDBDatastore",
     "PostgresDatastore",
+    "create_memory_datastore",
 ]

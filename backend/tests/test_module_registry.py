@@ -18,7 +18,7 @@ import pytest
 # Import MockBrokerProvider from conftest
 from tests.conftest import MockBrokerProvider  # type: ignore
 from trading_api.capabilities.datafeed import DatafeedCapability
-from trading_api.datastores import InMemoryDatastore
+from trading_api.datastores import create_memory_datastore
 from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
@@ -222,7 +222,7 @@ class TestModuleRegistryExistingFunctionality:
 
         # Provide mock provider for broker capability using get_modules
         mock_broker = MockBrokerProvider()
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
         modules = registry.get_modules(providers=[mock_broker], datastores=[datastore])
         module = modules[0] if modules else None
 
@@ -238,7 +238,7 @@ class TestModuleRegistryExistingFunctionality:
 
         # Provide mock provider for broker capability
         mock_broker = MockBrokerProvider()
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
         modules = registry.get_modules(providers=[mock_broker], datastores=[datastore])
 
         assert len(modules) == 1
@@ -309,7 +309,7 @@ class TestModuleVersionSelection:
 
         # Provide mock provider for broker capability
         mock_broker = MockBrokerProvider()
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
 
         # Load broker with only v1 using _get_instance directly
         module = registry._get_instance(
@@ -332,7 +332,7 @@ class TestModuleVersionSelection:
         # Provide mock providers for capabilities
         mock_datafeed = MockDatafeedProvider()
         mock_broker = MockBrokerProvider()
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
 
         # Load broker:v1 (specific version) and datafeed (all versions)
         broker = registry._get_instance(
@@ -356,7 +356,7 @@ class TestModuleVersionSelection:
         # Provide mock providers for capabilities
         mock_datafeed = MockDatafeedProvider()
         mock_broker = MockBrokerProvider()
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
 
         # Load broker:v1 (specific version)
         broker = registry._get_instance(
@@ -389,7 +389,7 @@ class TestModuleVersionSelection:
 
         # Provide mock provider for broker capability
         mock_broker = MockBrokerProvider()
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
 
         # Load broker:v1 twice
         module_1 = registry._get_instance(
@@ -410,7 +410,7 @@ class TestModuleVersionSelection:
 
         # Provide mock provider for broker capability
         mock_broker = MockBrokerProvider()
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
 
         # Load broker without version spec via get_modules
         modules = registry.get_modules(providers=[mock_broker], datastores=[datastore])

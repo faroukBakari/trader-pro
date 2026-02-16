@@ -1,225 +1,96 @@
-## 0. Prompt Routing
+## 1. Context Engineering
 
-Before your first action, route the request through these three steps — then delegate (§4). Your primary value is orchestration: skill-informed routing, parallel subagent dispatch, and context-clean synthesis. Inline execution is the exception, not the default.
+The context window is your most precious resource. Protect it.
 
-### Step 1: Route to Skill (Unconditional)
-
-ALWAYS scan skill descriptions (in the system-reminder skills list). Match → Read skill at `.claude/skills/{name}/SKILL.md`. No match → proceed without skill.
-
-| Task Signal                                    | Category             |
-| ---------------------------------------------- | -------------------- |
-| Debug, diagnose, root-cause                    | development          |
-| Implement, modify, build, decompose            | development          |
-| Type errors (Python / TS)                      | development          |
-| WebSocket features                             | development          |
-| Provider / integration                         | development          |
-| Review, audit, quality, request analysis       | review               |
-| Documentation                                  | review               |
-| Session retrospective                          | review               |
-| Test strategy, coverage, visual verification   | testing              |
-| Frontend (Vue, TS, UI, UX, a11y)               | frontend             |
-| Refactor                                       | development + review |
-| Research, explain, compare                     | workflow             |
-| Ambiguous / open-ended                         | workflow             |
-| Runtime, config, VS Code, MCP routing          | workflow             |
-| Session history, file recovery                 | workflow             |
-| Prompt engineering, model-specific tuning      | prompting            |
-| Reasoning effort, calibration, model selection | reasoning            |
-| TradingView charting, external API wrappers    | tradingview          |
-
-**Composite requests** (e.g., "review X and fix Y"): decompose into sub-tasks, route each independently (including modifier check per sub-task), execute in logical order.
-
-Applies to subagent delegation too — inject the matching skills into the subagent prompt.
-
-### Step 2: Assess Complexity
-
-| Tier | Signals                                              | Effort |
-| ---- | ---------------------------------------------------- | ------ |
-| T0   | Known file, known fix, <5 lines                      | low    |
-| T1   | Single file, clear scope                             | medium |
-| T2   | Multi-file or ambiguous scope                        | high   |
-| T3   | Architecture decision or multi-step tool workflow    | high   |
-| T4   | Adversarial, race condition, security, deep analysis | max    |
-
-Scope and reasoning depth are independent — a single-file race condition is T1 scope but needs T4 reasoning. When they diverge, use the **higher** tier for effort calibration.
-
-Ambiguous scope (e.g., "fix backend typo" with no file) → T2 minimum until clarified. User framing ("typo", "quick", "simple") describes expectations, not task properties — classify by what the task actually requires.
-
-### Step 3: Auto-attach Modifiers
-
-Cross-cutting skills that layer ON TOP of the primary skill when runtime signals appear during execution:
-
-| Signal                       | Auto-load                               | When                             |
-| ---------------------------- | --------------------------------------- | -------------------------------- |
-| Delegating to subagent       | `thinking-integration`                  | Before any `Task` tool call      |
-| Writing prompts for agents   | `prompting-guide` + model flaw catalog  | Prompt text in subagent prompt   |
-| Large file / diff / output   | `runtime-efficiency`                    | >200 lines, >3 files, >50KB      |
-| Mid-flight scope drift       | `drift-guard`                           | Blocker or scope change detected |
-| Entering implementation      | `implementation-reasoning`              | After planning, before coding    |
-| Bash command delegation      | `command-execution`, `terminal-usage`   | Bash subagent or complex shell   |
-| Multi-step subagent workflow | `context-persistence`                   | 2+ sequential subagent calls     |
-| Choosing model for subagent  | `model-selection`                       | `model:` parameter decision      |
-| Ambiguous user request       | `request-evaluation`                    | Vague scope, missing specifics   |
-
-### Skill Loading Mechanics
-
-Skills live as **leaf directories** at `.claude/skills/{name}/SKILL.md`. Each skill has YAML frontmatter with `name`, `description`, `category`, and `keywords`.
-
-| Step         | Action                                                    | Example                                       |
-| ------------ | --------------------------------------------------------- | --------------------------------------------- |
-| 1. **Scan**  | Check skill descriptions in system-reminder               | See "Available skills" list                   |
-| 2. **Load**  | Read the matching skill directly                          | `Read .claude/skills/debugging/SKILL.md`      |
-
-**Multi-skill tasks**: When a single task requires more than one domain skill (same or different categories), load each — primary first, then additional matches. Distinct from composite requests (sequential sub-tasks) and auto-attach modifiers (orthogonal concerns).
+- **Load on demand**: Skills provide methodology when matched. `REFERENCE.md` provides project knowledge. Auto-memory (`~/.claude/projects/*/memory/`) provides cross-session learning. None belong in working memory unless the current task needs them.
+- **Delegate to isolate**: Subagents run in their own context — their file reads, search results, and command output never accumulate in yours. This is the primary reason to delegate: context protection, not just parallelism.
+- **Build context for others**: Subagents are stateless. Inject the right knowledge: skills, file paths, constraints, expected outcome format. If you wouldn't understand the task from the prompt alone, neither will the subagent.
+- **Shed aggressively**: Prefer targeted reads (line ranges) over full files. Narrow searches before broadening. Delegate large-output commands to `Bash` subagents. Every token of context you don't need is a token that could have been reasoning.
 
 ---
 
-## 1. Process Gates
+## 2. Request Assessment & Outcome Framing
 
-### Behavioral Defaults
+Before acting, understand what the user actually needs.
 
-Cross-cutting principles applied regardless of active skill (detail: `engineering-principles` skill):
+- **Interpret, don't parrot**: "Fix the typo" might be a single character. "Fix the bug" might be an architecture change. Classify by what the task *actually requires*, not how the user framed it.
+- **Frame the outcome**: What artifact does "done" produce? Code change, plan, answer, PR, investigation report? What acceptance criteria are implied? Hold yourself to them.
+- **Surface ambiguity early**: If scope, approach, or outcome is unclear — ask. The cost of a question is one turn. The cost of wrong work is the whole session.
+- **Check existing knowledge**: Consult auto-memory for user preferences and prior decisions. Check `REFERENCE.md` for architectural constraints. Look at surrounding code for established patterns.
+
+---
+
+## 3. Calibration, Decomposition & Routing
+
+How complex is this? Should it be broken down? Who handles each part?
+
+**Complexity tiers** guide effort and approach:
+
+- **T0** (trivial): Known file, known fix, <5 lines. Execute inline.
+- **T1** (focused): Single file, clear scope. Inline or light delegation.
+- **T2** (multi-scope): Multiple files or ambiguous scope. Delegate or plan first.
+- **T3** (architectural): Design decisions, multi-step workflows. Plan mode.
+- **T4** (adversarial): Race conditions, security, deep analysis. Max effort + plan.
+
+When scope and reasoning depth diverge (e.g., single-file race condition), use the higher tier. User framing ("quick", "simple") describes expectations, not task properties — classify by what the work actually requires.
+
+**Skill scan**: Every turn, check available skill descriptions. Match found → read the skill. No match → proceed without one. Composite requests (e.g., "review X and fix Y") → decompose into sub-tasks, route each independently.
+
+**Cross-cutting skills** (load when their trigger appears, regardless of primary task):
+- `thinking-integration` → before subagent delegation, effort calibration
+- `runtime-efficiency` → large files/output (>200 lines, >50KB), convergence stalls
+- `command-execution` → Bash subagent delegation, complex shell commands
+- `vscode-mcp-routing` → file moves/renames, diagnostics-driven edit loops
+
+**Delegation as default**: For T1+ work, ask: *"Would a subagent handle this with equal quality while preserving my context?"* If yes — delegate. Agent templates in `.claude/agents/` provide focused expertise. Launch independent subtasks as concurrent subagents in a single message — sequential delegation of parallelizable work wastes wall-clock time.
+
+**Model selection**: Sonnet for implementation, research, and verification. Opus only for IA stack design (`.claude/` directory changes). Haiku for trivial lookups. These are cost decisions — Sonnet is 3-5x cheaper than Opus with comparable quality for scoped tasks.
+
+---
+
+## 4. Planning & Quality Gates
+
+**Planning triggers**: T2+ complexity, ambiguous scope, architectural decisions, or explicit user request. Use `EnterPlanMode` for structured planning, `Plan` subagent for quick approach validation.
+
+**Quality gates** (non-negotiable):
+
+- **Code** → run relevant tests before presenting as complete
+- **Documentation** → re-read after writing to verify accuracy
+- **Configuration** → confirm changes took effect (build, lint, health check)
+- If it can be verified, verify it before delivery
+
+**Outcome compliance**: After completing work, check — does the deliverable match the outcome framed in section 2? Does it satisfy the acceptance criteria? If not, iterate. Don't deliver incomplete work.
+
+---
+
+## 5. Execution & Monitoring
+
+**Behavioral defaults** (apply regardless of task type):
 
 1. **Reuse before building** — search workspace, existing deps, and standard libraries first
-2. **Align with industry standards** — follow RFCs, PEPs, OWASP, framework conventions; deviate only with justification
-3. **Simplicity** — straightforward solutions leveraging native features; avoid over-engineering
-4. **FinOps & token efficiency** — batch operations, filter output, checkpoint long investigations
+2. **Align with standards** — follow RFCs, PEPs, OWASP, framework conventions; deviate only with justification
+3. **Simplicity** — minimum complexity for the current task; no speculative abstractions
 
-### FinOps Checkpoints
+**Convergence monitoring**:
 
-Volume and convergence thresholds — for full handling protocols, load `runtime-efficiency` skill.
+- 8+ tool calls without deliverable progress → pause, reassess approach, ask user if stuck
+- 12+ tool calls without concrete output → stop, surface status and blockers to user
 
-| Checkpoint             | Trigger                                    | Action                                                 |
-| ---------------------- | ------------------------------------------ | ------------------------------------------------------ |
-| **Large file**         | File >200 lines                            | Targeted read (line ranges); never full-file           |
-| **Large diff**         | >3 files or >500 lines changed             | Delegate to subagent; chunk if inline                  |
-| **Bulk search**        | >20 matches returned                       | Narrow query or delegate to `Explore`                  |
-| **Large output**       | Command output >50KB expected              | Delegate to `Bash` subagent with filtered output       |
-| **Convergence**        | 8+ tool calls without deliverable progress | Pause → reassess approach → `AskUserQuestion` if stuck |
-| **Hard stop**          | 12+ tool calls without concrete output     | Stop → surface status and blockers to user             |
-| **Effort calibration** | Subagent delegation                        | Match model + effort to task tier (§0 Step 2)          |
+**Verify after changes**: Run diagnostics and tests after every edit batch, not just at the end. Catch errors early — the cost of a diagnostic check is trivial compared to debugging a cascade.
 
-### Delivery Quality Gate (No Unverified Output)
-
-- **Never deliver untested code**: Run relevant tests before presenting changes as complete
-- **Never deliver unchecked docs**: Re-read updated documentation to verify accuracy and consistency
-- **Never deliver unverified config**: Confirm changes took effect (build, lint, health check)
-- Applies to **all deliverables** — if it can be verified, verify it before delivery
+**Prefer dedicated tools**: Use `Read`/`Write`/`Edit`/`Glob`/`Grep` over Bash equivalents. Use VS Code MCP tools (`move_file_code`, `rename_file_code`, `get_diagnostics_code`) for workspace-aware operations. Reserve Bash for commands that genuinely require shell execution. Use env wrappers (`poetry run`, `make` targets) — never bare `pip`/`npm`/`python`.
 
 ---
 
-## 2. Architecture & Codebase
+## 6. Introspection & Self-Improvement
 
-> Architecture details, file locations, and documentation navigation: `.claude/REFERENCE.md`
-
----
-
-## 3. Runtime & Tools
-
-**Runtime**: **Claude Code CLI** on **WSL2 (Ubuntu 22.04)** with full Windows interop. VS Code Remote-WSL.
-
-- **Claude Code for VS Code**: CLI runs as the extension backend — inline chat, terminal panel, and diff review in-editor. MCP servers from `.vscode/mcp.json` auto-loaded alongside `.claude/settings.json` servers
-- **VS Code MCP server**: `mcp__vscode-mcp-server__*` tools available (diagnostics, move, rename, replace)
-- **Windows-side VS Code config writable** from WSL (settings, keybindings, MCP config)
-- **WSL interop enabled**: Windows executables (`powershell.exe`, `explorer.exe`, `clip.exe`, Chrome) callable directly
-- **Mirrored networking**: WSL and Windows share `localhost` — no port forwarding needed
-- **GPU**: RTX 4090 + CUDA 12.4 available (Ollama running)
-
-**Full inventory**: Detailed runtime awareness skill available.
-
-### VS Code - IDE Integration
-
-The VS Code MCP server (`mcp__vscode-mcp-server__*`) provides workspace-aware editing tools. Key routing:
-
-| Tool                                  | When                                                | Instead Of                                            |
-| ------------------------------------- | --------------------------------------------------- | ----------------------------------------------------- |
-| `get_diagnostics_code`                | **After every edit batch** + before task completion | Running individual linters                            |
-| `move_file_code` / `rename_file_code` | Moving/renaming **any source file**                 | `Bash mv` (breaks Write guard + skips import updates) |
-| `replace_lines_code`                  | Fixing errors at known line numbers                 | `Edit` when `old_string` isn't unique                 |
-| `create_file_code`                    | Scaffolding with `ignoreIfExists: true`             | `Write` when file might already exist                 |
-
-**Critical**: Never `Bash mv` then `Write`. Use `move_file_code`/`rename_file_code` instead.
-
-**Full methodology**: look for vscode mcp skill.
-
-### Interaction Guidelines
-
-- For user interaction, use `AskUserQuestion`.
-- For subagent delegation, use `Task` tool with `subagent_type`.
-- For browser automation, use `mcp__playwright__*` tools directly, or delegate via `general-purpose` subagent.
-- For commands (`Bash`): check for a `make` target first; use env wrappers (`poetry run`, `make -C {stack}`) — never bare `npm`/`pip`/`python`; set `timeout`; append `2>&1`. Batch or large output → delegate to `Bash` subagent with `command-execution` skill.
-- For filesystem operations, use `Read`/`Write`/`Edit`/`Glob` by default — see VS Code MCP Tools table above. For exceptions (`move`/`rename`, `diagnostics`, `line-targeted` fixes).
-
-### Permission Matrix
-
-Your permissions are governed by `.claude/settings.json` (project-level) and `.claude/settings.local.json` (user-level). Key rules:
-
-- **Development commands via Makefiles** → auto-approved
-- **Git read operations** → auto-approved
-- **Git push** → denied (manual user push only)
-- **Direct `pip`/`npm`/`poetry add`** → denied (use Makefile targets)
+- **Session learning**: When you discover stable patterns, recurring solutions, or user preferences — record in auto-memory. When existing memory is wrong — update or remove it.
+- **Failure analysis**: When an approach fails, understand *why* before trying alternatives. Record root causes of non-obvious failures for future sessions.
+- **Skill gaps**: When you lack methodology for a recurring task type, note it as a candidate for a new skill.
 
 ---
 
-## 4. Task Delegation (CLI Subagents)
-
-**Delegate aggressively.** Subagents are not a fallback — they are the primary execution mechanism for any task beyond T0 complexity. Each subagent runs in an isolated context with only the tools and knowledge it needs, which means:
-
-- **Your context stays clean** — every file read, search result, and command output a subagent processes does NOT accumulate in your window. Inline execution of multi-step work bloats your context and degrades later reasoning.
-- **Parallel execution** — independent subtasks (e.g., backend fix + frontend fix, research + test run, multiple file investigations) MUST be launched as concurrent subagents in a single message. Sequential delegation of parallelizable work wastes wall-clock time.
-- **FinOps by design** — subagents use Sonnet by default (3-5x cheaper than Opus). Only escalate to Opus for IA stack design. The delegation table below encodes these cost decisions.
-- **Skill injection** — subagents receive domain skills and agent templates tuned for their task type, giving them focused expertise without loading irrelevant context.
-
-**Bias check**: Before executing any T1+ work inline, ask yourself: *"Would a subagent handle this with equal or better quality while preserving my context?"* If yes — delegate. The cost of spawning a subagent is near-zero; the cost of context bloat compounds across every subsequent turn.
-
-**Built-in Subagent Types** (only valid values for `subagent_type`):
-
-| `subagent_type`   | Use For                                                       | Effort |
-| ----------------- | ------------------------------------------------------------- | ------ |
-| `Explore`         | Codebase search, file discovery, architecture understanding   | low    |
-| `Plan`            | Implementation planning, architecture design                  | high   |
-| `Bash`            | Terminal command execution                                    | low    |
-| `general-purpose` | Multi-step research, complex searches, feature implementation | high   |
-
-> **Effort column**: Recommended thinking effort per `thinking-integration` skill.
-
-**Custom Agent Templates** (`.claude/agents/`):
-
-Structured prompt templates injected into `Task(subagent_type="general-purpose")` calls. Each defines identity, constraints, methodology, tool routing, and output format.
-
-| Agent | Model | Use For | Template |
-|-------|-------|---------|----------|
-| `agentic-designer` | opus | IA stack design, maintenance, `.claude/` edits | `.claude/agents/agentic-designer.md` |
-| `research` | sonnet | Read-only investigation, evidence gathering | `.claude/agents/research.md` |
-| `verify` | sonnet | Post-implementation verification, falsification-first | `.claude/agents/verify.md` |
-| `implement` | sonnet | Code changes, test execution, diagnostics validation | `.claude/agents/implement.md` |
-| `frontend` | sonnet | Vue 3 UI, UX design, TradingView, Playwright verification | `.claude/agents/frontend.md` |
-| `backend` | sonnet | Python APIs, providers, IB integration, WebSocket, testing | `.claude/agents/backend.md` |
-
-**Delegation Rules**:
-
-| Task Type                                                                  | `subagent_type`                       | Notes                                         |
-| -------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------- |
-| IA stack artifact (`.claude/` directory)                                   | `general-purpose` + `model: "opus"`   | Inject `agentic-designer` template                |
-| Broad codebase search                                                      | `Explore`                             |                                               |
-| Large-output commands                                                      | `Bash`                                | Inject `command-execution` skill              |
-| Implementation planning                                                    | `Plan` or `EnterPlanMode`             |                                               |
-| Frontend (UI, UX, Vue components, TradingView, visual verification)        | `general-purpose` + `model: "sonnet"` | Inject frontend agent template                |
-| Backend (APIs, providers, IB integration, WebSocket, datastores, tests)    | `general-purpose` + `model: "sonnet"` | Inject backend agent template                 |
-| Single-file fix                                                            | `general-purpose` + `model: "sonnet"` | Inject implement agent template               |
-| Research / doc gathering                                                   | `general-purpose`                     | Inject research agent template                |
-| Post-implementation verification                                           | `general-purpose` + `model: "sonnet"` | Inject verify agent template                  |
-| Everything else (features, tests, reviews, debugging, browser, doc-update) | `general-purpose`                     | Default; use `model: "sonnet"` for doc-update |
-
----
-
-## ROUTING REMINDER (Recency Anchor)
-
-> Every user turn: scan skill descriptions → match skill → Read skill → execute. No exceptions. If no skill matches, proceed — but the scan must happen.
-
----
-
-## 5. Compact Instructions (FOR SUMMARIZER AGENT ONLY)
+## 7. Compact Instructions (FOR SUMMARIZER AGENT ONLY)
 
 > Preservation priorities when context is compacted (manual `/compact` or auto-compression).
 

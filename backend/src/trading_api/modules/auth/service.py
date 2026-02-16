@@ -187,6 +187,17 @@ class AuthService(AuthServiceInterface, ServiceInterface):
                 module="auth",
             )
 
+        # Atomically revoke the old token BEFORE issuing new ones.
+        # DuckDBTable.delete() is lock-protected: only one concurrent caller
+        # gets True, the rest get False (token already consumed).
+        revoked = await self.token_repository.revoke_token(token_hash)
+        if not revoked:
+            raise ServiceException(
+                code="SERVICE_AUTH_INVALID_REFRESH_TOKEN",
+                message="Invalid refresh token",
+                module="auth",
+            )
+
         user = await self.user_repository.get_by_id(token_data["user_id"])
         if user is None:
             raise ServiceException(
@@ -207,8 +218,6 @@ class AuthService(AuthServiceInterface, ServiceInterface):
             device_info=device_info,
             created_at=datetime.now(),
         )
-
-        await self.token_repository.revoke_token(token_hash)
 
         return TokenResponse(
             access_token=new_access_token,

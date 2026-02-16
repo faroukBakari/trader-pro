@@ -7,7 +7,6 @@ All datastores use uniform async factory pattern via DatastoreInterface.create()
 import asyncio
 import importlib
 import logging
-import threading
 from pathlib import Path
 
 from trading_api.models.common import DatastoreCapabilitySpec
@@ -38,7 +37,9 @@ class DatastoreRegistry:
         )
         self._datastore_classes: dict[str, type[DatastoreInterface]] = {}
         self._instances: dict[str, DatastoreInterface] = {}
-        self._lock = threading.Lock()  # Thread-safe to extend usage beyond asyncio
+        self._lock = (
+            asyncio.Lock()
+        )  # Async-safe for use with await inside critical section
 
     def auto_discover(self, enabled_names: list[str] | None = None) -> None:
         """Auto-discover datastores from directory, optionally filtering by name.
@@ -48,10 +49,10 @@ class DatastoreRegistry:
 
         Args:
             enabled_names: Datastore folder names to load (None = all).
-                          e.g., ["inmemory"] or ["inmemory", "postgres"]
+                          e.g., ["duckdb"] or ["duckdb", "postgres"]
 
-        Example: datastores/inmemory/__init__.py exports InMemoryDatastore(DatastoreInterface)
-                 → registered as "inmemory" (from folder name)
+        Example: datastores/duckdb/__init__.py exports DuckDBDatastore(DatastoreInterface)
+                 → registered as "duckdb" (from folder name)
         """
         enabled_names = enabled_names or []
         for datastore_path in self._datastores_dir.iterdir():
@@ -73,7 +74,7 @@ class DatastoreRegistry:
                 continue
 
             try:
-                # Import: trading_api.datastores.inmemory
+                # Import: trading_api.datastores.duckdb (or postgres, etc.)
                 module_import = importlib.import_module(
                     f"trading_api.datastores.{folder_name}"
                 )
@@ -173,10 +174,9 @@ class DatastoreRegistry:
 
         [THREAD-SAFE]: Uses lock to prevent race conditions.
         """
-        # Slow path: create instance with lock
-        # Needed as we have multithreading + asyncio
-        with self._lock:
-            # Check after acquiring lock
+        # Async lock: prevents concurrent creation of the same datastore
+        # while allowing the event loop to continue servicing other coroutines
+        async with self._lock:
             if name in self._instances:
                 return self._instances[name]
 

@@ -141,7 +141,7 @@ class DatastoreException(TradingApiException):
     - Connection issues
 
     Attributes:
-        datastore: Datastore type (e.g., "postgres", "inmemory")
+        datastore: Datastore type (e.g., "postgres", "duckdb")
         table: Table name where error occurred (optional)
 
     Error code convention: DATASTORE_{OPERATION}_{ERROR_TYPE}

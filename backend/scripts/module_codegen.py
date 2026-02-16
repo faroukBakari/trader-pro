@@ -29,7 +29,7 @@ async def main_async() -> None:
 
     try:
         # Import dependencies
-        from trading_api.datastores import InMemoryDatastore
+        from trading_api.datastores import create_memory_datastore
         from trading_api.shared.module_interface import ModuleApp
         from trading_api.shared.provider_registry import ProviderRegistry
 
@@ -49,7 +49,7 @@ async def main_async() -> None:
         providers = await provider_registry.get_providers(required_capabilities)
 
         # Create shared datastore for modules that need it
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
 
         # NOTE: WS routers are automatically generated during module instantiation!
         # When module_class() is called, the module's __init__ creates WsRouters,

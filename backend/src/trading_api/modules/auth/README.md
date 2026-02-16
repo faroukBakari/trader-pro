@@ -1,7 +1,7 @@
 # Auth Module
 
 **Version:** 1.2.0  
-**Status:** ✅ Production Ready (MVP with In-Memory Storage)  
+**Status:** ✅ Production Ready (MVP with DuckDB Storage)
 **Last Updated:** January 27, 2026
 
 JWT-based authentication module with Google OAuth integration, cookie-based session management, and device fingerprinting.

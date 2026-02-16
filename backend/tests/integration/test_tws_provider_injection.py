@@ -36,7 +36,7 @@ async def test_tws_provider_injection(mock_tws_connection):
     # Create app with datafeed module enabled
     factory = AppFactory()
     app = await factory.create_app(
-        enabled_module_names=["datafeed"], enabled_datastores=["inmemory"]
+        enabled_module_names=["datafeed"], enabled_datastores=["duckdb"]
     )
 
     # Call build_modules() to populate runtime state (normally done in lifespan)
@@ -68,7 +68,7 @@ async def test_datafeed_service_has_provider_property(mock_tws_connection):
     """Test DatafeedService has datafeed_provider property."""
     factory = AppFactory()
     app = await factory.create_app(
-        enabled_module_names=["datafeed"], enabled_datastores=["inmemory"]
+        enabled_module_names=["datafeed"], enabled_datastores=["duckdb"]
     )
 
     # Call build_modules() to populate runtime state (normally done in lifespan)
@@ -95,7 +95,7 @@ async def test_tws_provider_has_datafeed_capability(mock_tws_connection):
     """Test TWSDatafeedProvider implements DatafeedCapability."""
     factory = AppFactory()
     app = await factory.create_app(
-        enabled_module_names=["datafeed"], enabled_datastores=["inmemory"]
+        enabled_module_names=["datafeed"], enabled_datastores=["duckdb"]
     )
 
     # Call build_modules() to populate runtime state (normally done in lifespan)

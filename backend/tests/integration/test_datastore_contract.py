@@ -1,14 +1,14 @@
 """Datastore Contract Tests - validates all DatastoreInterface implementations.
 
 These tests ensure every datastore implementation conforms to the DatastoreInterface
-contract. Tests are parametrized to run against InMemory and Postgres datastores.
+contract. Tests are parametrized to run against DuckDB and Postgres datastores.
 
 [ARCHITECTURE] DRY principle: Common behavior tested once, implementation-specific
 tests focus only on unique features (e.g., psycopg UniqueViolation, connection pools).
 
 Run with:
 - All datastores: pytest tests/integration/test_datastore_contract.py -v
-- InMemory only: pytest tests/integration/test_datastore_contract.py -v -k inmemory
+- DuckDB only: pytest tests/integration/test_datastore_contract.py -v -k duckdb
 - Postgres only: pytest tests/integration/test_datastore_contract.py -v -k postgres -m integration
 """
 
@@ -16,12 +16,17 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
+import duckdb
 import pytest
 from sqlmodel import Field, SQLModel
 
-from trading_api.datastores import InMemoryDatastore
+from trading_api.datastores import DuckDBDatastore
 from trading_api.shared.config import Settings
-from trading_api.shared.datastore_interface import DatastoreInterface, TableInterface
+from trading_api.shared.datastore_interface import (
+    DatastoreInterface,
+    TableInterface,
+    TimeSeriesTableInterface,
+)
 
 # =============================================================================
 # Test Models
@@ -64,12 +69,12 @@ class UniqueIndexedContractModel(SQLModel, table=True):
 
 
 @pytest.fixture
-async def inmemory_datastore(
-    test_settings: Settings,
-) -> AsyncIterator[DatastoreInterface]:
-    """InMemoryDatastore fixture using test_settings."""
-    ds = await InMemoryDatastore.create(config=test_settings)
+async def duckdb_datastore() -> AsyncIterator[DatastoreInterface]:
+    """DuckDBDatastore fixture using in-memory database."""
+    conn = duckdb.connect(":memory:")
+    ds = DuckDBDatastore(conn)
     yield ds
+    await ds.close()
 
 
 @pytest.fixture
@@ -90,7 +95,7 @@ async def postgres_datastore(
 
 @pytest.fixture(
     params=[
-        pytest.param("inmemory", id="inmemory", marks=[pytest.mark.integration]),
+        pytest.param("duckdb", id="duckdb", marks=[pytest.mark.integration]),
         pytest.param(
             "postgres",
             id="postgres",
@@ -100,16 +105,16 @@ async def postgres_datastore(
 )
 async def any_datastore(
     request: pytest.FixtureRequest,
-    inmemory_datastore: DatastoreInterface,
+    duckdb_datastore: DatastoreInterface,
     postgres_datastore: DatastoreInterface | None,
 ) -> AsyncIterator[DatastoreInterface]:
     """Parametrized fixture providing each datastore implementation.
 
-    Both variants require @pytest.mark.integration marker.
+    All variants require @pytest.mark.integration marker.
     Postgres additionally has @pytest.mark.postgres for selective runs.
     """
-    if request.param == "inmemory":
-        yield inmemory_datastore
+    if request.param == "duckdb":
+        yield duckdb_datastore
     elif request.param == "postgres":
         if postgres_datastore is None:
             pytest.skip("PostgreSQL not available")
@@ -556,12 +561,13 @@ class TestFeatureFlagConsistency:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_inmemory_feature_flags(
-        self, inmemory_datastore: DatastoreInterface
+    async def test_duckdb_feature_flags(
+        self, duckdb_datastore: DatastoreInterface
     ) -> None:
-        """InMemoryDatastore has expected capabilities (none)."""
-        assert inmemory_datastore.has_capability("persistence") is False
-        assert inmemory_datastore.has_capability("transactions") is False
+        """DuckDBDatastore has timeseries but no persistence/transactions."""
+        assert duckdb_datastore.has_capability("timeseries") is True
+        assert duckdb_datastore.has_capability("persistence") is False
+        assert duckdb_datastore.has_capability("transactions") is False
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -574,3 +580,137 @@ class TestFeatureFlagConsistency:
             pytest.skip("PostgreSQL not available")
         assert postgres_datastore.has_capability("persistence") is True
         assert postgres_datastore.has_capability("transactions") is True
+
+
+# =============================================================================
+# Timeseries Contract Tests
+# =============================================================================
+
+
+class TimeSeriesContractModel(SQLModel, table=True):
+    """Test model for timeseries contract tests."""
+
+    __tablename__ = cast(Any, "timeseries_contract_model")
+
+    time: int = Field(primary_key=True)
+    value: float
+
+
+@pytest.fixture(
+    params=[
+        pytest.param("duckdb", id="duckdb", marks=[pytest.mark.integration]),
+        pytest.param(
+            "postgres",
+            id="postgres",
+            marks=[pytest.mark.integration, pytest.mark.postgres],
+        ),
+    ]
+)
+async def timeseries_datastore(
+    request: pytest.FixtureRequest,
+    duckdb_datastore: DatastoreInterface,
+    postgres_datastore: DatastoreInterface | None,
+) -> AsyncIterator[DatastoreInterface]:
+    """Parametrized fixture for datastores with timeseries capability."""
+    if request.param == "duckdb":
+        yield duckdb_datastore
+    elif request.param == "postgres":
+        if postgres_datastore is None:
+            pytest.skip("PostgreSQL not available")
+        yield postgres_datastore
+
+
+@pytest.fixture
+async def ts_table(
+    timeseries_datastore: DatastoreInterface,
+) -> AsyncIterator[TimeSeriesTableInterface[Any]]:
+    """Timeseries table fixture with drop/recreate for test isolation.
+
+    Mirrors the `table` fixture pattern: drops before and after each test
+    to ensure no leftover data from previous tests.
+    """
+    table_name = cast(str, TimeSeriesContractModel.__tablename__)
+    await timeseries_datastore.drop_table(table_name)
+    ts = timeseries_datastore.timeseries_table(TimeSeriesContractModel)
+    yield ts
+    await timeseries_datastore.drop_table(table_name)
+
+
+class TestTimeSeriesContract:
+    """Contract tests for TimeSeriesTableInterface implementations."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_set_batch_returns_new_insert_count(
+        self, ts_table: TimeSeriesTableInterface[Any]
+    ) -> None:
+        """set_batch returns count of NEW inserts, not updates."""
+        # First batch: all new
+        items = [
+            TimeSeriesContractModel(time=100, value=1.0),
+            TimeSeriesContractModel(time=200, value=2.0),
+        ]
+        assert await ts_table.set_batch(items) == 2
+
+        # Second batch: 1 update + 1 new
+        items2 = [
+            TimeSeriesContractModel(time=200, value=2.5),
+            TimeSeriesContractModel(time=300, value=3.0),
+        ]
+        assert await ts_table.set_batch(items2) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_set_batch_empty_returns_zero(
+        self, ts_table: TimeSeriesTableInterface[Any]
+    ) -> None:
+        """set_batch with empty list returns 0."""
+        assert await ts_table.set_batch([]) == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_get_time_range_inclusive_bounds_ordered(
+        self, ts_table: TimeSeriesTableInterface[Any]
+    ) -> None:
+        """get_time_range uses inclusive bounds and returns ascending order."""
+        items = [
+            TimeSeriesContractModel(time=100, value=1.0),
+            TimeSeriesContractModel(time=200, value=2.0),
+            TimeSeriesContractModel(time=300, value=3.0),
+            TimeSeriesContractModel(time=400, value=4.0),
+        ]
+        await ts_table.set_batch(items)
+
+        results = await ts_table.get_time_range(200, 300)
+        assert len(results) == 2
+        assert results[0].time == 200
+        assert results[1].time == 300
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_get_time_range_empty_table(
+        self, ts_table: TimeSeriesTableInterface[Any]
+    ) -> None:
+        """get_time_range on empty table returns empty list."""
+        assert await ts_table.get_time_range(0, 9999) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_set_batch_upsert_overwrites_value(
+        self, ts_table: TimeSeriesTableInterface[Any]
+    ) -> None:
+        """set_batch with existing key updates the value."""
+        await ts_table.set_batch([TimeSeriesContractModel(time=100, value=1.0)])
+        await ts_table.set_batch([TimeSeriesContractModel(time=100, value=9.9)])
+
+        results = await ts_table.get_time_range(100, 100)
+        assert len(results) == 1
+        assert results[0].value == 9.9
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_timeseries_table_is_timeseries_interface(
+        self, ts_table: TimeSeriesTableInterface[Any]
+    ) -> None:
+        """timeseries_table returns a TimeSeriesTableInterface instance."""
+        assert isinstance(ts_table, TimeSeriesTableInterface)

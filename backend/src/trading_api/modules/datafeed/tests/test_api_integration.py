@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from trading_api.datastores import InMemoryDatastore, PostgresDatastore
+from trading_api.datastores import PostgresDatastore, create_memory_datastore
 from trading_api.models.market import Bar, Resolution, SearchSymbolResultItem
 from trading_api.modules.datafeed.service import DatafeedService
 from trading_api.shared.config import Settings
@@ -26,7 +26,7 @@ def mock_provider() -> MockDatafeedProvider:
 def service(mock_provider: MockDatafeedProvider) -> DatafeedService:
     """Create DatafeedService with mock provider."""
     module_dir = Path(__file__).parent.parent
-    datastore = InMemoryDatastore()
+    datastore = create_memory_datastore()
     return DatafeedService(
         module_dir, providers=[mock_provider], datastores=[datastore]
     )
@@ -276,10 +276,10 @@ class TestGetBarsCaching:
     """
 
     @pytest.mark.asyncio
-    async def test_cache_bypass_with_inmemory_datastore(
+    async def test_cache_bypass_with_duckdb_lite_datastore(
         self, service: DatafeedService, mock_provider: MockDatafeedProvider
     ) -> None:
-        """Test that InMemoryDatastore bypasses cache (no exclusion capability)."""
+        """Test that DuckDB lite datastore bypasses cache (no exclusion capability)."""
         # Arrange: Configure provider to return bars
         mock_bars = [
             Bar(
@@ -294,7 +294,7 @@ class TestGetBarsCaching:
         ]
         mock_provider.return_values["get_historical_bars"] = mock_bars
 
-        # Verify service has no cache_manager with InMemoryDatastore
+        # Verify service has no cache_manager with DuckDB lite datastore
         assert service._cache_manager is None
 
         # Act: First call
