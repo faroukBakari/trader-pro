@@ -10,12 +10,14 @@ Provides lightweight SQL-backed storage for prototyping and testing with:
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from collections.abc import AsyncIterator, Sequence
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, get_args
 
 import duckdb
+from pydantic import BaseModel
 from sqlmodel import SQLModel
 
 from trading_api.datastores._utils import extract_indexes
@@ -63,7 +65,7 @@ class DuckDBTable(TableInterface):
     since DuckDB connections are not thread-safe.
     """
 
-    _SAFE_IDENT = __import__("re").compile(r"^[a-z][a-z0-9_]*$")
+    _SAFE_IDENT = __import__("re").compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
 
     def __init__(
         self,
@@ -94,6 +96,18 @@ class DuckDBTable(TableInterface):
         self._model_columns: list[str] = list(model_class.model_fields.keys())
         # All columns: _row_key + model fields
         self._all_columns: list[str] = [_KEY_COL, *self._model_columns]
+
+        # Identify fields whose annotation is a Pydantic model (stored as JSON strings)
+        self._json_fields: set[str] = set()
+        for name, field_info in model_class.model_fields.items():
+            ann = field_info.annotation
+            args = get_args(ann)
+            if args and type(None) in args:
+                non_none = [a for a in args if a is not type(None)]
+                if non_none:
+                    ann = non_none[0]
+            if isinstance(ann, type) and issubclass(ann, BaseModel):
+                self._json_fields.add(name)
 
         # Create table and indexes (sync, caller MUST hold self._lock)
         self._create_table()
@@ -132,6 +146,11 @@ class DuckDBTable(TableInterface):
     def _row_to_model(self, row: tuple, columns: list[str]) -> SQLModel:
         """Deserialize a SQL row tuple into a model instance."""
         data = dict(zip(columns, row))
+        # JSON fields are stored as VARCHAR strings — parse back to dicts
+        for field_name in self._json_fields:
+            val = data.get(field_name)
+            if isinstance(val, str):
+                data[field_name] = json.loads(val)
         return self._model_class.model_validate(data)
 
     def _validate_index(self, index: str | None) -> None:
@@ -233,7 +252,10 @@ class DuckDBTable(TableInterface):
                 placeholders = ", ".join(["?"] * len(self._all_columns))
                 vals: list[Any] = [key]
                 for field_name in self._model_columns:
-                    vals.append(getattr(value, field_name, None))
+                    val = getattr(value, field_name, None)
+                    if val is not None and field_name in self._json_fields:
+                        val = val.model_dump_json()
+                    vals.append(val)
 
                 self._conn.execute(
                     f"INSERT INTO {self._table_name} "
@@ -444,7 +466,10 @@ class DuckDBTimeSeriesTable(DuckDBTable, TimeSeriesTableInterface[SQLModel]):
                     )
                     vals: list[Any] = [key]
                     for field_name in self._model_columns:
-                        vals.append(getattr(value, field_name, None))
+                        val = getattr(value, field_name, None)
+                        if val is not None and field_name in self._json_fields:
+                            val = val.model_dump_json()
+                        vals.append(val)
 
                     col_names = ", ".join(self._all_columns)
                     placeholders = ", ".join(["?"] * len(self._all_columns))

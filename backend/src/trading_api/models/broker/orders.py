@@ -5,7 +5,9 @@ Broker order models matching TradingView broker API types
 from enum import Enum, IntEnum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from sqlalchemy import JSON, Column
+from sqlmodel import Field, SQLModel
 
 
 class OrderStatus(IntEnum):
@@ -135,14 +137,21 @@ class PreOrder(BaseModel):
     model_config = {"use_enum_values": True}
 
 
-class PlacedOrder(BaseModel):
+class PlacedOrder(SQLModel, table=True):
     """
     Complete order with status (matching TradingView PlacedOrder/PlacedOrderBase)
-    Contains information about a placed order
+    Contains information about a placed order.
+
+    DuckDB table with indexes for fast lookups:
+    - Primary key: id (order ID)
+    - Index: symbol (for symbol-based queries)
+    - Index: parentId (for bracket order lookups)
     """
 
-    id: str = Field(..., description="Order ID")
-    symbol: str = Field(..., description="Symbol name")
+    __tablename__ = "placed_orders"  # pyright: ignore[reportAssignmentType]
+
+    id: str = Field(primary_key=True, description="Order ID")
+    symbol: str = Field(index=True, description="Symbol name")
     type: OrderType = Field(..., description="Order type")
     side: Side = Field(..., description="Order side (buy or sell)")
     qty: float = Field(..., description="Order quantity", gt=0)
@@ -174,19 +183,25 @@ class PlacedOrder(BaseModel):
         default=None, description="Last update time (unix timestamp in milliseconds)"
     )
     parentId: Optional[str] = Field(
-        default=None, description="Parent order/position ID for bracket orders"
+        default=None,
+        index=True,
+        description="Parent order/position ID for bracket orders",
     )
     parentType: Optional[ParentType] = Field(
         default=None, description="Type of parent (Order=1, Position=2)"
     )
     duration: Optional[OrderDuration] = Field(
-        default=None, description="Order duration/expiration"
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description="Order duration/expiration",
     )
     message: Optional[OrderOrPositionMessage] = Field(
-        default=None, description="Order state message"
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description="Order state message",
     )
 
-    model_config = {"use_enum_values": True}
+    model_config = {"use_enum_values": True}  # pyright: ignore[reportAssignmentType]
 
 
 class PlaceOrderResult(BaseModel):

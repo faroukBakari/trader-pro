@@ -30,7 +30,10 @@
 
 **Tooling**: Use `Read`/`Write`/`Edit`/`Glob`/`Grep` over Bash equivalents. Use VS Code MCP tools (`move_file_code`, `rename_file_code`, `get_diagnostics_code`) for workspace-aware operations. Use env wrappers (`poetry run`, `make` targets) — never bare `pip`/`npm`/`python`.
 
-**Quality gates**: Code → run tests. Docs → re-read after writing. Config → confirm changes took effect.
+**Quality gates**:
+- Code → run type-check (`make -C backend type-check` for Python, `make -C frontend type-check` for TypeScript) + run tests (`make -C backend test` or `make -C frontend test`). Type-check is recommended for all code changes; tests are mandatory.
+- New features / breaking refactors → run coverage (`make -C backend test-cov`) and check for gaps. Update relevant docs (module READMEs, `datastores/README.md`, architecture docs in `backend/docs/`).
+- Docs → re-read after writing. Config → confirm changes took effect.
 
 ---
 

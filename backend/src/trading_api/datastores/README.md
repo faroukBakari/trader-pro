@@ -47,13 +47,13 @@ if datastore.has_capability("transactions"):
     logger.info("Transactions available")
 ```
 
-| Capability Name   | DuckDB | Postgres |
-| ----------------- | ------ | -------- |
-| `"persistence"`   | ❌     | ✅       |
+| Capability Name  | DuckDB | Postgres |
+| ---------------- | ------ | -------- |
+| `"persistence"`  | ❌     | ✅       |
 | `"transactions"` | ❌     | ✅       |
-| `"exclusion"`     | ❌     | ✅       |
-| `"timeseries"`    | ✅     | ✅       |
-| `"rangequery"`    | ❌     | ✅       |
+| `"exclusion"`    | ❌     | ✅       |
+| `"timeseries"`   | ✅     | ✅       |
+| `"rangequery"`   | ❌     | ✅       |
 
 **`"exclusion"`**: Database-level exclusion constraints (e.g., PostgreSQL `EXCLUDE USING GIST`) that atomically prevent overlapping ranges. Used for cache metadata tables like `PendingRange` and `CoveredRange`.
 
@@ -71,12 +71,12 @@ Capabilities describe **what a datastore can do** (functional contracts), not **
 
 Each capability name must map to a concrete interface or behavioral contract that is meaningful to consumers regardless of the underlying storage engine.
 
-| Good (functional) | Bad (implementation-specific) | Why it's wrong |
-|---|---|---|
-| `"timeseries"` | `"inmemory"` | Describes storage mechanism, not consumer-facing behavior |
-| `"persistence"` | `"duckdb"` | Names a specific technology, not a capability |
-| `"transactions"` | `"sql-backed"` | Leaks implementation detail to consumers |
-| `"rangequery"` | `"fast-lookup"` | Performance characteristic, not a contract |
+| Good (functional) | Bad (implementation-specific) | Why it's wrong                                            |
+| ----------------- | ----------------------------- | --------------------------------------------------------- |
+| `"timeseries"`    | `"inmemory"`                  | Describes storage mechanism, not consumer-facing behavior |
+| `"persistence"`   | `"duckdb"`                    | Names a specific technology, not a capability             |
+| `"transactions"`  | `"sql-backed"`                | Leaks implementation detail to consumers                  |
+| `"rangequery"`    | `"fast-lookup"`               | Performance characteristic, not a contract                |
 
 **When NOT to use a datastore capability:**
 
@@ -280,6 +280,7 @@ SQL-backed storage via DuckDB for prototyping and testing with:
 - Async CRUD via `asyncio.to_thread()` wrapping sync SQL
 - Secondary indexing via SQL CREATE INDEX
 - Unique constraint enforcement with pre-check pattern
+- Automatic JSON serde for nested Pydantic `BaseModel` fields
 - Time-series support via `DuckDBTimeSeriesTable`
 
 ### Architecture
@@ -292,7 +293,8 @@ DuckDBDatastore
         ├── _lock: threading.Lock               # Per-table thread safety
         ├── _model_columns: list[str]           # Model field names
         ├── _indexes: set[str]                  # Secondary index columns
-        └── _unique_indexes: set[str]           # Unique constraint columns
+        ├── _unique_indexes: set[str]           # Unique constraint columns
+        └── _json_fields: set[str]              # Fields with BaseModel annotations (JSON-serialized)
 ```
 
 ### API Reference
@@ -380,6 +382,33 @@ class UserRepository:
 - **All operations**: Serialized via `threading.Lock` (one operation at a time)
 - **Async bridging**: `asyncio.to_thread()` prevents blocking the event loop
 - **Thread safety**: Supports TWS callback threads via the same threading.Lock
+
+### JSON Field Handling (Nested Pydantic Models)
+
+Fields annotated with a `BaseModel` subclass (e.g., `Optional[OrderDuration]`) are automatically serialized to JSON strings for DuckDB VARCHAR storage and deserialized back on read.
+
+**Detection**: At table init, `DuckDBTable` inspects each field's type annotation (unwrapping `Optional`). Fields whose inner type is a `BaseModel` subclass are added to `self._json_fields`.
+
+**Write path** (`set()` / `set_batch()`): Values in `_json_fields` are serialized via `val.model_dump_json()` before SQL INSERT.
+
+**Read path** (`_row_to_model()`): VARCHAR values for `_json_fields` are parsed via `json.loads()` before `model_validate()`, restoring the nested Pydantic model.
+
+```python
+from sqlalchemy import JSON, Column
+from sqlmodel import Field, SQLModel
+
+class PlacedOrder(SQLModel, table=True):
+    __tablename__ = cast(Any, "placed_orders")
+
+    id: str = Field(primary_key=True)
+    # Nested Pydantic model → auto JSON serialization
+    duration: Optional[OrderDuration] = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+```
+
+> **Note**: The `sa_column=Column(JSON)` declaration is for SQLAlchemy/PostgreSQL compatibility. DuckDB stores these as VARCHAR — the JSON serde is handled by `DuckDBTable`, not by SQLAlchemy column types.
 
 ### Exclusion Constraint Limitations
 
@@ -557,7 +586,7 @@ from datetime import datetime
 
 class User(SQLModel, table=True):
     """User model - unified API and database representation."""
-    __tablename__ = "users"
+    __tablename__ = cast(Any, "users")
 
     id: str = Field(primary_key=True)
     email: str = Field(index=True)
@@ -615,7 +644,7 @@ from sqlmodel import Field, SQLModel
 from trading_api.types import Int8RangeType, TimeRange
 
 class PendingRange(SQLModel, table=True):
-    __tablename__ = "pending_ranges"
+    __tablename__ = cast(Any, "pending_ranges")
 
     id: str = Field(primary_key=True)
     lookup_key: str = Field(index=True)
