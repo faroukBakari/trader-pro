@@ -195,7 +195,7 @@ raise DatastoreException(
 **Additional Attributes:**
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `datastore` | `str` | Datastore type (e.g., "postgres", "inmemory") |
+| `datastore` | `str` | Datastore type (e.g., "postgres", "duckdb") |
 | `table` | `str \| None` | Table name where error occurred (optional) |
 
 **When to use:**

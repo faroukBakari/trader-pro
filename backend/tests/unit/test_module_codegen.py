@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 # Import MockBrokerProvider from conftest
 from tests.conftest import MockBrokerProvider  # type: ignore  # noqa: E402
 from trading_api.capabilities.datafeed import DatafeedCapability  # noqa: E402
-from trading_api.datastores import InMemoryDatastore  # noqa: E402
+from trading_api.datastores import create_memory_datastore  # noqa: E402
 from trading_api.models.common import CapabilitySpec, ProviderConfig  # noqa: E402
 from trading_api.models.exceptions import (  # noqa: E402
     CommonException,
@@ -113,7 +113,7 @@ class TestModuleCodegen:
         """
         # Provide mock provider for datafeed capability
         mock_provider = MockDatafeedProvider()
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
 
         # Instantiate module with provider
         module = DatafeedModule(providers=[mock_provider], datastores=[datastore])
@@ -129,7 +129,7 @@ class TestModuleCodegen:
         """Test that BrokerModule can generate apps via ModuleApp wrapper."""
         # Provide mock provider for broker capability
         mock_provider = MockBrokerProvider()
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
 
         # Instantiate module with provider
         module = BrokerModule(providers=[mock_provider], datastores=[datastore])
@@ -145,7 +145,7 @@ class TestModuleCodegen:
         """Test that ModuleApp can generate specs and clients."""
         # Provide mock provider for datafeed capability
         mock_provider = MockDatafeedProvider()
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
 
         # Instantiate module with provider
         module = DatafeedModule(providers=[mock_provider], datastores=[datastore])
@@ -164,7 +164,7 @@ class TestModuleCodegen:
         This ensures fail-fast validation works when modules are
         instantiated directly (e.g., in codegen scripts).
         """
-        datastore = InMemoryDatastore()
+        datastore = create_memory_datastore()
         with pytest.raises(
             CommonException,
             match="Service 'auth' requires capability 'auth'",

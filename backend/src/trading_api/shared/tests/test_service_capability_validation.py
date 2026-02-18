@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from trading_api.datastores.inmemory import InMemoryDatastore
+from trading_api.datastores import create_memory_datastore
 from trading_api.models.common import ProviderCapabilitySpec
 from trading_api.models.exceptions import CommonException
 from trading_api.shared.service_interface import ServiceInterface
@@ -31,7 +31,7 @@ def test_service_fails_without_required_capability() -> None:
         MockServiceRequiringAuth(
             module_dir=Path("/tmp"),
             providers=[],  # No providers → should fail
-            datastores=[InMemoryDatastore()],
+            datastores=[create_memory_datastore()],
         )
 
 
@@ -49,7 +49,7 @@ async def test_service_succeeds_with_required_capability() -> None:
     service = MockServiceRequiringAuth(
         module_dir=Path("/tmp"),
         providers=[provider],
-        datastores=[InMemoryDatastore()],
+        datastores=[create_memory_datastore()],
     )
 
     assert service.get_capability_provider("auth") == provider

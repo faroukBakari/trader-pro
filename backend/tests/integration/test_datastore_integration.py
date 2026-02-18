@@ -1,10 +1,10 @@
-"""Datastore integration tests - validates both InMemory and Postgres implementations.
+"""Datastore integration tests - validates both DuckDB and Postgres implementations.
 
 These tests run the same test cases against multiple datastore implementations
 to ensure interface conformance and behavioral consistency.
 
 Test organization:
-- InMemory tests: Run always, no external dependencies
+- DuckDB tests: Run always, no external dependencies (in-memory mode)
 - PostgreSQL tests: Marked with @pytest.mark.postgres, require test_database fixture
 
 PostgreSQL tests require the test_database fixture which:
@@ -14,7 +14,7 @@ PostgreSQL tests require the test_database fixture which:
 
 Run with:
 - All tests: make -C backend test-integration
-- InMemory only: pytest tests/integration/test_datastore_integration.py -v -m "not postgres"
+- DuckDB only: pytest tests/integration/test_datastore_integration.py -v -m "not postgres"
 - PostgreSQL only: pytest tests/integration/test_datastore_integration.py -v -m postgres
 """
 
@@ -23,7 +23,7 @@ from typing import AsyncIterator
 
 import pytest
 
-from trading_api.datastores import InMemoryDatastore
+from trading_api.datastores import create_memory_datastore
 from trading_api.modules.auth.repository import RefreshTokenRepository, UserRepository
 from trading_api.modules.auth.tests.conftest import DeviceInfoFactory, UserCreateFactory
 from trading_api.shared.config import Settings
@@ -31,9 +31,9 @@ from trading_api.shared.datastore_interface import DatastoreInterface
 
 
 @pytest.fixture
-async def inmemory_datastore() -> AsyncIterator[DatastoreInterface]:
-    """InMemoryDatastore fixture - no external dependencies."""
-    yield InMemoryDatastore()
+async def duckdb_lite_datastore() -> AsyncIterator[DatastoreInterface]:
+    """DuckDB lite datastore fixture - no external dependencies."""
+    yield create_memory_datastore()
 
 
 @pytest.fixture
@@ -67,13 +67,15 @@ async def postgres_datastore(
 
 
 @pytest.mark.integration
-class TestUserRepositoryInMemory:
-    """Test UserRepository with InMemoryDatastore."""
+class TestUserRepositoryDuckDBLite:
+    """Test UserRepository with DuckDB lite datastore."""
 
     @pytest.fixture
-    def user_repository(self, inmemory_datastore: DatastoreInterface) -> UserRepository:
-        """Create UserRepository with InMemoryDatastore."""
-        return UserRepository(datastore=inmemory_datastore)
+    def user_repository(
+        self, duckdb_lite_datastore: DatastoreInterface
+    ) -> UserRepository:
+        """Create UserRepository with DuckDB lite datastore."""
+        return UserRepository(datastore=duckdb_lite_datastore)
 
     @pytest.mark.asyncio
     async def test_create_user(self, user_repository: UserRepository) -> None:
@@ -220,15 +222,15 @@ class TestUserRepositoryPostgres:
 
 
 @pytest.mark.integration
-class TestRefreshTokenRepositoryInMemory:
-    """Test RefreshTokenRepository with InMemoryDatastore."""
+class TestRefreshTokenRepositoryDuckDBLite:
+    """Test RefreshTokenRepository with DuckDB lite datastore."""
 
     @pytest.fixture
     def token_repository(
-        self, inmemory_datastore: DatastoreInterface
+        self, duckdb_lite_datastore: DatastoreInterface
     ) -> RefreshTokenRepository:
-        """Create RefreshTokenRepository with InMemoryDatastore."""
-        return RefreshTokenRepository(datastore=inmemory_datastore)
+        """Create RefreshTokenRepository with DuckDB lite datastore."""
+        return RefreshTokenRepository(datastore=duckdb_lite_datastore)
 
     @pytest.mark.asyncio
     async def test_store_and_get_token(
@@ -405,18 +407,18 @@ class TestDatastoreFeatureFlags:
     """Test datastore capabilities via has_capability() method."""
 
     @pytest.mark.asyncio
-    async def test_inmemory_has_persistence_false(
-        self, inmemory_datastore: DatastoreInterface
+    async def test_duckdb_lite_has_persistence_false(
+        self, duckdb_lite_datastore: DatastoreInterface
     ) -> None:
-        """InMemoryDatastore.has_capability('persistence') is False."""
-        assert inmemory_datastore.has_capability("persistence") is False
+        """DuckDB lite datastore.has_capability('persistence') is False."""
+        assert duckdb_lite_datastore.has_capability("persistence") is False
 
     @pytest.mark.asyncio
-    async def test_inmemory_has_transactions_false(
-        self, inmemory_datastore: DatastoreInterface
+    async def test_duckdb_lite_has_transactions_false(
+        self, duckdb_lite_datastore: DatastoreInterface
     ) -> None:
-        """InMemoryDatastore.has_capability('transactions') is False."""
-        assert inmemory_datastore.has_capability("transactions") is False
+        """DuckDB lite datastore.has_capability('transactions') is False."""
+        assert duckdb_lite_datastore.has_capability("transactions") is False
 
     @pytest.mark.asyncio
     @pytest.mark.postgres

@@ -1,7 +1,7 @@
 # Datastores
 
-**Status**: ✅ Production Ready  
-**Last Updated**: January 2026
+**Status**: ✅ Production Ready
+**Last Updated**: February 2026
 
 ## Overview
 
@@ -20,8 +20,9 @@ The datastore layer provides a minimal abstraction for data persistence that ena
 datastores/
 ├── __init__.py           # Re-exports for backward compatibility
 ├── README.md             # This file
-├── inmemory/             # InMemoryDatastore implementation
-│   ├── __init__.py       # Exports InMemoryDatastore, InMemoryTable
+├── _utils.py             # Shared utilities (extract_indexes)
+├── duckdb/               # DuckDBDatastore implementation
+│   ├── __init__.py       # Exports DuckDBDatastore, DuckDBTable
 │   └── tests/
 └── postgres/             # PostgresDatastore implementation
     ├── __init__.py       # Exports PostgresDatastore, SQLModelTable
@@ -46,13 +47,13 @@ if datastore.has_capability("transactions"):
     logger.info("Transactions available")
 ```
 
-| Capability Name   | InMemory | Postgres |
-| ----------------- | -------- | -------- |
-| `"persistence"`   | ❌       | ✅       |
-| `"transactions"` | ❌       | ✅       |
-| `"exclusion"`     | ❌       | ✅       |
-| `"timeseries"`    | ❌       | ✅       |
-| `"rangequery"`    | ❌       | ✅       |
+| Capability Name  | DuckDB | Postgres |
+| ---------------- | ------ | -------- |
+| `"persistence"`  | ❌     | ✅       |
+| `"transactions"` | ❌     | ✅       |
+| `"exclusion"`    | ❌     | ✅       |
+| `"timeseries"`   | ✅     | ✅       |
+| `"rangequery"`   | ❌     | ✅       |
 
 **`"exclusion"`**: Database-level exclusion constraints (e.g., PostgreSQL `EXCLUDE USING GIST`) that atomically prevent overlapping ranges. Used for cache metadata tables like `PendingRange` and `CoveredRange`.
 
@@ -61,6 +62,33 @@ if datastore.has_capability("transactions"):
 **`"timeseries"`**: Time-series operations via `TimeSeriesTableInterface`. When available, `timeseries_table()` returns a table with `get_time_range()` and `set_batch()` methods for efficient time-indexed queries. Otherwise, use standard `TableInterface` with manual filtering.
 
 **`"rangequery"`**: Range query operations via `RangeQueryTableInterface`. When available, `rangequery_table()` returns a table with `get_missing_ranges()` for accurate gap detection using PostgreSQL multirange subtraction. Otherwise, fall back to boundary-based algorithms (which may miss internal gaps).
+
+### Capability Design Guidelines
+
+Capabilities describe **what a datastore can do** (functional contracts), not **how it is implemented** (technology choices). This distinction is critical for maintaining a clean abstraction boundary.
+
+**Rule: Capabilities must be implementation-agnostic.**
+
+Each capability name must map to a concrete interface or behavioral contract that is meaningful to consumers regardless of the underlying storage engine.
+
+| Good (functional) | Bad (implementation-specific) | Why it's wrong                                            |
+| ----------------- | ----------------------------- | --------------------------------------------------------- |
+| `"timeseries"`    | `"inmemory"`                  | Describes storage mechanism, not consumer-facing behavior |
+| `"persistence"`   | `"duckdb"`                    | Names a specific technology, not a capability             |
+| `"transactions"`  | `"sql-backed"`                | Leaks implementation detail to consumers                  |
+| `"rangequery"`    | `"fast-lookup"`               | Performance characteristic, not a contract                |
+
+**When NOT to use a datastore capability:**
+
+- **Ephemeral in-process state** (e.g., bracket enrichment caches, session-scoped lookups): Use plain `dict` or in-memory data structures directly. A datastore adds serialization overhead, async ceremony, and unnecessary coupling for data that is process-scoped and does not survive restarts.
+- **Implementation routing** (e.g., "use DuckDB because it's in-memory"): Select datastores by functional need (`"timeseries"`, `"persistence"`), not by implementation identity. If no functional capability is needed, no datastore is needed.
+
+**When to introduce a new capability:**
+
+1. There is a new `*TableInterface` (e.g., `GraphTableInterface`) or behavioral contract
+2. At least two datastore implementations could differ in support for it
+3. Services need to declare a requirement that affects datastore selection
+4. The capability name describes a consumer-visible behavior, not an implementation detail
 
 ---
 
@@ -113,11 +141,11 @@ The `DatastoreCapabilitySpec` model supports:
 ]
 ```
 
-### InMemoryDatastore Capabilities
+### DuckDBDatastore Capabilities
 
 ```python
-# InMemoryDatastore.capabilities() returns:
-[]  # No advanced capabilities
+# DuckDBDatastore.capabilities() returns:
+[DatastoreCapabilitySpec(name="timeseries")]
 ```
 
 ### AppFactory Integration
@@ -130,7 +158,7 @@ required_caps = module_registry.required_datastore_capabilities()
 
 # DatastoreRegistry filters by capabilities
 datastores = datastore_registry.get_datastores(
-    names=["postgres", "inmemory"],
+    names=["postgres", "duckdb"],
     required_capabilities=required_caps,
 )
 ```
@@ -203,13 +231,13 @@ from trading_api.shared import DatastoreRegistry
 
 # Registry auto-discovers from datastores/ subdirectories
 registry = DatastoreRegistry()
-registry.auto_discover()  # Finds inmemory/, postgres/, etc.
+registry.auto_discover()  # Finds duckdb/, postgres/, etc.
 
 # Get all registered datastores
-datastores = registry.get_datastores()  # [InMemoryDatastore()]
+datastores = registry.get_datastores()  # [DuckDBDatastore()]
 
 # Get specific datastore by name
-datastores = registry.get_datastores(names=["inmemory"])
+datastores = registry.get_datastores(names=["duckdb"])
 ```
 
 ### AppFactory Integration
@@ -221,7 +249,7 @@ factory = AppFactory()
 app = await factory.create_app(
     enabled_module_names=["broker", "auth"],
     enabled_provider_names=["fakebroker", "google"],
-    enabled_datastores=["inmemory"],  # NEW: filter datastores
+    enabled_datastores=["duckdb"],  # NEW: filter datastores
 )
 ```
 
@@ -243,27 +271,30 @@ class PostgresDatastore(DatastoreInterface):
 
 ---
 
-## InMemoryDatastore
+## DuckDBDatastore
 
-Dict-based storage for MVP and testing with:
+SQL-backed storage via DuckDB for prototyping and testing with:
 
-- Per-table read-write locks for concurrent access
-- Async CRUD operations with Pydantic model validation
-- Secondary indexing (1:N field → keys mapping)
-- Unique indexing (1:1 field → key mapping with constraint enforcement)
-- Auto-indexing on `set()` for all registered indexes
+- In-memory (`:memory:`) or file-based DuckDB backend
+- Per-table threading.Lock for concurrent access
+- Async CRUD via `asyncio.to_thread()` wrapping sync SQL
+- Secondary indexing via SQL CREATE INDEX
+- Unique constraint enforcement with pre-check pattern
+- Automatic JSON serde for nested Pydantic `BaseModel` fields
+- Time-series support via `DuckDBTimeSeriesTable`
 
 ### Architecture
 
 ```
-InMemoryDatastore
-└── _tables: dict[str, InMemoryTable]
+DuckDBDatastore
+└── _tables: dict[str, DuckDBTable]
         │
-        ├── __data: dict[str, BaseModel]           # Primary storage
-        ├── __indexes: dict[str, dict[str, set[str]]]  # Secondary indexes (1:N)
-        ├── __unique_indexes: dict[str, dict[str, str]] # Unique indexes (1:1)
-        ├── __lock: RWLock                         # Async read-write lock
-        └── __threading_lock: threading.Lock       # Cross-thread sync (TWS)
+        ├── _conn: duckdb.DuckDBPyConnection    # DuckDB connection
+        ├── _lock: threading.Lock               # Per-table thread safety
+        ├── _model_columns: list[str]           # Model field names
+        ├── _indexes: set[str]                  # Secondary index columns
+        ├── _unique_indexes: set[str]           # Unique constraint columns
+        └── _json_fields: set[str]              # Fields with BaseModel annotations (JSON-serialized)
 ```
 
 ### API Reference
@@ -272,19 +303,19 @@ InMemoryDatastore
 
 `TableInterface` is generic over `T` (a Pydantic `BaseModel`), enabling type-safe returns:
 
-| Method                                   | Lock  | Return Type                   | Description                                   |
-| ---------------------------------------- | ----- | ----------------------------- | --------------------------------------------- |
-| `get(key, index=None, session=None)`     | Read  | `T \| None`                   | Get value by key or indexed field             |
-| `get_all(key, index=None, session=None)` | Read  | `list[T]`                     | Get all values matching indexed field         |
-| `set(key, value, session=None)`          | Write | `None`                        | Store value, auto-index all registered fields |
-| `delete(key, index=None, session=None)`  | Write | `bool`                        | Delete by key or indexed field                |
-| `exists(key, index=None, session=None)`  | Read  | `bool`                        | Check if key/indexed value exists             |
-| `keys(index=None)`                       | Read  | `list[str]`                   | Get all keys or indexed field values          |
-| `values()`                               | Read  | `list[T]`                     | Get all values (deep copies)                  |
-| `clear(session=None)`                    | Write | `None`                        | Remove all entries and indexes                |
-| `count()`                                | Read  | `int`                         | Get entry count                               |
-| `iterate()`                              | Read  | `AsyncIterator[tuple[str,T]]` | Async iterate over key-value pairs            |
-| `is_empty` (property)                    | Read  | `bool`                        | Returns True if table has zero entries        |
+| Method                                   | Lock | Return Type                   | Description                                   |
+| ---------------------------------------- | ---- | ----------------------------- | --------------------------------------------- |
+| `get(key, index=None, session=None)`     | Lock | `T \| None`                   | Get value by key or indexed field             |
+| `get_all(key, index=None, session=None)` | Lock | `list[T]`                     | Get all values matching indexed field         |
+| `set(key, value, session=None)`          | Lock | `None`                        | Store value, auto-index all registered fields |
+| `delete(key, index=None, session=None)`  | Lock | `bool`                        | Delete by key or indexed field                |
+| `exists(key, index=None, session=None)`  | Lock | `bool`                        | Check if key/indexed value exists             |
+| `keys(index=None)`                       | Lock | `list[str]`                   | Get all keys or indexed field values          |
+| `values()`                               | Lock | `list[T]`                     | Get all values (deep copies)                  |
+| `clear(session=None)`                    | Lock | `None`                        | Remove all entries and indexes                |
+| `count()`                                | Lock | `int`                         | Get entry count                               |
+| `iterate()`                              | Lock | `AsyncIterator[tuple[str,T]]` | Async iterate over key-value pairs            |
+| `is_empty` (property)                    | Lock | `bool`                        | Returns True if table has zero entries        |
 
 > **Note**: The `session` parameter enables transaction batching (see [Transaction Support](#transaction-support-session-injection)). When `session=None`, each operation auto-commits. When provided, caller controls commit.
 
@@ -295,7 +326,7 @@ InMemoryDatastore
 | Method                           | Description                                                            |
 | -------------------------------- | ---------------------------------------------------------------------- |
 | `table(model_class)`             | Get or create table for model class (auto-extracts indexes from Field) |
-| `datastore_name()` (classmethod) | Canonical name for registry lookup (e.g., "inmemory")                  |
+| `datastore_name()` (classmethod) | Canonical name for registry lookup (e.g., "duckdb")                    |
 | `list_tables(prefix)`            | List all table names, optionally filtered by prefix                    |
 | `drop_table(name)`               | Drop a table by name (returns True if dropped, False if not found)     |
 
@@ -348,27 +379,54 @@ class UserRepository:
 
 ### Concurrency Model
 
-- **Read operations**: Concurrent access allowed (multiple readers)
-- **Write operations**: Exclusive access (single writer, no readers)
-- **Writer priority**: Writers are prioritized to prevent starvation
+- **All operations**: Serialized via `threading.Lock` (one operation at a time)
+- **Async bridging**: `asyncio.to_thread()` prevents blocking the event loop
+- **Thread safety**: Supports TWS callback threads via the same threading.Lock
+
+### JSON Field Handling (Nested Pydantic Models)
+
+Fields annotated with a `BaseModel` subclass (e.g., `Optional[OrderDuration]`) are automatically serialized to JSON strings for DuckDB VARCHAR storage and deserialized back on read.
+
+**Detection**: At table init, `DuckDBTable` inspects each field's type annotation (unwrapping `Optional`). Fields whose inner type is a `BaseModel` subclass are added to `self._json_fields`.
+
+**Write path** (`set()` / `set_batch()`): Values in `_json_fields` are serialized via `val.model_dump_json()` before SQL INSERT.
+
+**Read path** (`_row_to_model()`): VARCHAR values for `_json_fields` are parsed via `json.loads()` before `model_validate()`, restoring the nested Pydantic model.
+
+```python
+from sqlalchemy import JSON, Column
+from sqlmodel import Field, SQLModel
+
+class PlacedOrder(SQLModel, table=True):
+    __tablename__ = cast(Any, "placed_orders")
+
+    id: str = Field(primary_key=True)
+    # Nested Pydantic model → auto JSON serialization
+    duration: Optional[OrderDuration] = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+```
+
+> **Note**: The `sa_column=Column(JSON)` declaration is for SQLAlchemy/PostgreSQL compatibility. DuckDB stores these as VARCHAR — the JSON serde is handled by `DuckDBTable`, not by SQLAlchemy column types.
 
 ### Exclusion Constraint Limitations
 
-**InMemoryDatastore does NOT support exclusion constraints.** Models that declare exclusion requirements via `__table_args__["info"]["exclusion"]` will raise `NotImplementedError` when passed to `table()`:
+**DuckDBDatastore does NOT support exclusion constraints.** Models that declare exclusion requirements via `__table_args__["info"]["exclusion"]` will raise `NotImplementedError` when passed to `table()`:
 
 ```python
 from trading_api.models.market import PendingRange  # Has exclusion constraint
 
-# InMemoryDatastore rejects models requiring exclusion constraints
-inmemory_ds = InMemoryDatastore()
-inmemory_ds.table(PendingRange)  # Raises NotImplementedError!
+# DuckDBDatastore rejects models requiring exclusion constraints
+duckdb_ds = DuckDBDatastore()
+duckdb_ds.table(PendingRange)  # Raises NotImplementedError!
 
 # Use PostgresDatastore for such models
 postgres_ds = await PostgresDatastore.create()
 postgres_ds.table(PendingRange)  # Works - creates EXCLUDE USING GIST constraint
 ```
 
-**Rationale**: Exclusion constraints require database-level atomic enforcement to prevent overlapping ranges across concurrent writes. InMemoryDatastore cannot provide this guarantee.
+**Rationale**: Exclusion constraints require database-level atomic enforcement to prevent overlapping ranges across concurrent writes. DuckDBDatastore cannot provide this guarantee.
 
 ---
 
@@ -414,7 +472,7 @@ See [postgres/README.md](postgres/README.md) for detailed error messages and rem
 - **Typed Column Storage**: All models use SQLModel with `table=True` for typed PostgreSQL columns
 - **Async Factory Pattern**: Pool creation is async, use `PostgresDatastore.create()` factory
 - **No-Op RWLock**: PostgreSQL MVCC provides transaction isolation, app-level locks are redundant
-- **Typed Model Returns**: `get()`, `get_all()`, `values()` return validated Pydantic model instances (same as InMemoryDatastore)
+- **Typed Model Returns**: `get()`, `get_all()`, `values()` return validated Pydantic model instances (same as DuckDBDatastore)
 - **SQL Injection Safety**: All queries use `psycopg.sql.SQL/Identifier/Literal` for safe dynamic SQL composition
 
 ### Usage
@@ -528,7 +586,7 @@ from datetime import datetime
 
 class User(SQLModel, table=True):
     """User model - unified API and database representation."""
-    __tablename__ = "users"
+    __tablename__ = cast(Any, "users")
 
     id: str = Field(primary_key=True)
     email: str = Field(index=True)
@@ -586,7 +644,7 @@ from sqlmodel import Field, SQLModel
 from trading_api.types import Int8RangeType, TimeRange
 
 class PendingRange(SQLModel, table=True):
-    __tablename__ = "pending_ranges"
+    __tablename__ = cast(Any, "pending_ranges")
 
     id: str = Field(primary_key=True)
     lookup_key: str = Field(index=True)
@@ -709,7 +767,7 @@ class BarRepository:
             ts_table = self._get_timeseries_table(symbol)
             return await ts_table.set_batch(bars)
 
-        # Fallback for InMemory (no timeseries support)
+        # Fallback for datastores without timeseries support
         table = self._datastore.table(self._model_cache[symbol])
         for bar in bars:
             await table.set(str(bar.time), bar)
@@ -770,11 +828,11 @@ if self._datastore.has_rangequery:
     gaps = await rq_table.get_missing_ranges(lookup_key=key, query_range=query_range)
     return [TimeRange(start=gap.start, end=gap.end) for gap in gaps]
 
-# Fallback for InMemory (no rangequery support)
-return await self.__find_missing_ranges_inmemory(...)
+# Fallback for datastores without rangequery support
+return await self.__find_missing_ranges_fallback(...)
 ```
 
-**Pattern**: Use `has_rangequery` property for capability detection. This enables PostgreSQL's efficient set operations while maintaining InMemory fallback compatibility.
+**Pattern**: Use `has_rangequery` property for capability detection. This enables PostgreSQL's efficient set operations while maintaining fallback compatibility for datastores without range query support.
 
 ---
 
@@ -792,7 +850,7 @@ The datastore tests follow a three-tier structure:
 
 2. **Implementation-Specific Tests** (`datastores/{impl}/tests/test_{impl}_specific.py`):
    - Tests unique features of each implementation
-   - InMemory: RWLock behavior, BaseModel return type, deep copy
+   - DuckDB: threading.Lock serialization, SQL semantics, timeseries batch ops
    - Postgres: psycopg exceptions, connection pool, model validation
 
 3. **Integration Tests** (`tests/integration/test_datastore_integration.py`):
@@ -831,11 +889,11 @@ async def clean_bar_tables(datastore: DatastoreInterface) -> AsyncIterator[None]
 ### Running Tests
 
 ```bash
-# All contract tests (InMemory + Postgres)
+# All contract tests (DuckDB + Postgres)
 cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v
 
-# InMemory-specific tests
-cd backend && poetry run pytest src/trading_api/datastores/inmemory/tests/ -v
+# DuckDB-specific tests
+cd backend && poetry run pytest src/trading_api/datastores/duckdb/tests/ -v
 
 # PostgreSQL-specific tests (uses testcontainers)
 cd backend && poetry run pytest src/trading_api/datastores/postgres/tests/ -v

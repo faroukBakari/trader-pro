@@ -34,7 +34,7 @@ from trading_api.models.broker import (
     Position,
     PreOrder,
 )
-from trading_api.models.common import ProviderCapabilitySpec
+from trading_api.models.common import DatastoreCapabilitySpec, ProviderCapabilitySpec
 from trading_api.models.exceptions import ServiceException, TradingApiException
 from trading_api.modules.broker.order_manager import OrderManager
 from trading_api.shared.ws.ws_router import (
@@ -89,6 +89,11 @@ class BrokerService(WsRouteService):
         """
         return [ProviderCapabilitySpec(name="broker")]
 
+    @classmethod
+    def datastore_capabilities(cls) -> list[DatastoreCapabilitySpec]:
+        """No specific capabilities — works with any datastore."""
+        return []
+
     @property
     def broker_provider(self) -> BrokerCapability:
         """Cached O(1) lookup - type-safe provider access.
@@ -122,8 +127,7 @@ class BrokerService(WsRouteService):
         # Track provider subscription IDs for each topic (for cleanup)
         self._topic_to_subscription_id: dict[str, str] = {}
 
-        # Service-layer order state with bracket enrichment
-        self._order_manager = OrderManager()
+        self._order_manager = OrderManager(datastore=self.get_featured_datastore())
 
     # ================================ GETTERS (delegate to provider) =========
 
@@ -137,8 +141,8 @@ class BrokerService(WsRouteService):
             user_id: User ID for scoping (unused for now)
         """
         raw_orders = await self.broker_provider.get_orders()
-        self._order_manager.sync(raw_orders)
-        return self._order_manager.get_all()
+        await self._order_manager.sync(raw_orders)
+        return await self._order_manager.get_all()
 
     async def get_positions(self, user_id: str) -> list[Position]:
         """Get all positions for a user.
@@ -221,12 +225,45 @@ class BrokerService(WsRouteService):
     async def modify_order(self, order_id: str, order: PreOrder, user_id: str) -> None:
         """Modify an existing order.
 
+        Diffs bracket fields against current state to avoid re-submitting
+        unchanged bracket legs to TWS (which rejects redundant child
+        modifications while the parent is mid-modification).
+
         Args:
             order_id: ID of order to modify
             order: Updated order details
             user_id: User ID for scoping (unused for now)
         """
+        order = await self._strip_unchanged_brackets(order_id, order)
         await self.broker_provider.modify_order(order_id, order)
+
+    async def _strip_unchanged_brackets(
+        self, order_id: str, order: PreOrder
+    ) -> PreOrder:
+        """Remove bracket fields from PreOrder if they match current state.
+
+        Prevents redundant child order modifications that TWS rejects
+        when the parent order is being modified simultaneously.
+        """
+        current = await self._order_manager.get(order_id)
+        if current is None:
+            return order  # Unknown order — pass through as-is
+
+        updates: dict[str, None] = {}
+        if order.takeProfit is not None and order.takeProfit == current.takeProfit:
+            updates["takeProfit"] = None
+        if order.stopLoss is not None and order.stopLoss == current.stopLoss:
+            updates["stopLoss"] = None
+        if (
+            order.trailingStopPips is not None
+            and order.trailingStopPips == current.trailingStopPips
+        ):
+            updates["trailingStopPips"] = None
+
+        if not updates:
+            return order  # All brackets changed (or none present)
+
+        return order.model_copy(update=updates)
 
     async def cancel_order(self, order_id: str, user_id: str) -> None:
         """Cancel an order.
@@ -338,7 +375,7 @@ class BrokerService(WsRouteService):
 
             async def _order_update_callback(order: PlacedOrder) -> None:
                 """Route order updates through OrderManager for bracket enrichment."""
-                affected = self._order_manager.upsert(order)
+                affected = await self._order_manager.upsert(order)
                 for enriched_order in affected:
                     await topic_update(enriched_order)
 

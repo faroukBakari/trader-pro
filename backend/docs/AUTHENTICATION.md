@@ -1,7 +1,7 @@
 # Authentication System
 
 **Version:** 2.0.0  
-**Status:** ✅ Production Ready (MVP with In-Memory Storage)  
+**Status:** ✅ Production Ready (MVP with DuckDB Storage)
 **Last Updated:** November 30, 2025
 
 > **Consolidated Documentation**: This document combines cross-cutting authentication architecture with backend module implementation details.
@@ -73,7 +73,7 @@ The Trading Pro platform implements a **JWT-based authentication system** with G
 │  │              Auth Module (modules/auth/)                  │  │
 │  │  ┌────────────┐  ┌──────────────┐  ┌─────────────────┐  │  │
 │  │  │ Repository │  │   Service    │  │   API (v1.py)   │  │  │
-│  │  │ (In-Memory)│→ │ (AuthService)│→ │ (/login, /me)   │  │  │
+│  │  │ (DuckDB)   │→ │ (AuthService)│→ │ (/login, /me)   │  │  │
 │  │  └────────────┘  └──────────────┘  └─────────────────┘  │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                               ↓                                 │
@@ -578,7 +578,7 @@ INTERNAL_SIGNATURE_TTL_SECONDS: int = 30  # Replay protection window
 
 **⚠️ Limitations:**
 
-- In-memory storage (no persistence)
+- DuckDB in-memory storage (no persistence across restarts)
 - Basic device fingerprinting (IP + User-Agent only)
 - No rate limiting
 - No anomaly detection
@@ -653,7 +653,7 @@ def mock_google_oauth(monkeypatch):
 
 ### Current State (MVP)
 
-- ✅ In-memory storage (thread-safe)
+- ✅ DuckDB in-memory storage (thread-safe)
 - ⚠️ Data lost on restart
 - ⚠️ Single-server only
 

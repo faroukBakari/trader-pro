@@ -79,6 +79,7 @@ export interface APIMetadata {
 export interface GetBarsResponse {
   bars: Array<Bar>
   no_data?: boolean
+  next_time?: number | null
 }
 
 export interface GetQuotesRequest {

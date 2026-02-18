@@ -44,7 +44,7 @@ async def auth_app() -> ModularApp:
     # Auto-discover only auth module with google provider
     module_registry.auto_discover(enabled_modules=["auth"])
     provider_registry.auto_discover(enabled_names=["google"])
-    datastore_registry.auto_discover(enabled_names=["inmemory"])
+    datastore_registry.auto_discover(enabled_names=["duckdb"])
 
     # Create datastore using async/await (avoid asyncio.get_event_loop() for Python 3.10+)
     datastores = await datastore_registry.get_datastores()
@@ -64,7 +64,7 @@ async def auth_app() -> ModularApp:
         base_url=settings.API_PREFIX,
         enabled_modules=["auth"],
         enabled_providers=["google"],
-        enabled_datastores=["inmemory"],
+        enabled_datastores=["duckdb"],
         title="Trading API (Test)",
         version="1.0.0",
     )

@@ -43,7 +43,7 @@ from trading_api.shared.datastore_interface import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
@@ -553,7 +553,7 @@ class TimeSeriesSQLModelTable(SQLModelTable[T], TimeSeriesTableInterface[T]):
 
     async def set_batch(
         self,
-        values: list[T],
+        values: "Sequence[T]",
         session: "AsyncSession | None" = None,
     ) -> int:
         """Bulk upsert values using batch INSERT...ON CONFLICT.

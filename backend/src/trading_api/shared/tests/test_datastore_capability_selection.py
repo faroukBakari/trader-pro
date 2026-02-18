@@ -4,11 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from trading_api.datastores.inmemory import InMemoryDatastore
+from trading_api.datastores import DuckDBDatastore
 from trading_api.datastores.postgres.datastore import PostgresDatastore
 from trading_api.models.common import DatastoreCapabilitySpec, ProviderCapabilitySpec
 from trading_api.models.exceptions import CommonException
 from trading_api.shared.service_interface import ServiceInterface
+from trading_api.shared.tests.conftest import NullDatastore
 
 
 class MockServiceWithTimeseries(ServiceInterface):
@@ -94,10 +95,17 @@ def test_datastore_capability_spec_is_frozen() -> None:
 # =============================================================================
 
 
-def test_inmemory_datastore_has_no_capabilities() -> None:
-    """InMemoryDatastore provides no special capabilities."""
-    caps = InMemoryDatastore.capabilities()
+def test_null_datastore_has_no_capabilities() -> None:
+    """NullDatastore provides no special capabilities."""
+    caps = NullDatastore.capabilities()
     assert caps == []
+
+
+def test_duckdb_datastore_has_timeseries_capability() -> None:
+    """DuckDBDatastore provides timeseries capability."""
+    caps = DuckDBDatastore.capabilities()
+    cap_names = {cap.name for cap in caps}
+    assert "timeseries" in cap_names
 
 
 def test_postgres_datastore_has_all_capabilities() -> None:
@@ -120,48 +128,48 @@ def test_postgres_datastore_has_all_capabilities() -> None:
 
 def test_get_featured_datastore_returns_matching_datastore() -> None:
     """get_featured_datastore returns datastore with required capability."""
-    inmemory = InMemoryDatastore()
+    null_ds = NullDatastore()
 
     # MockServiceNoDatastoreRequirements can use get_featured_datastore
     # with explicit runtime requirements
     service = MockServiceNoDatastoreRequirements(
         module_dir=Path("/tmp"),
         providers=[],
-        datastores=[inmemory],
+        datastores=[null_ds],
     )
 
-    # InMemory has no capabilities, so requesting one should fail
+    # NullDatastore has no capabilities, so requesting one should fail
     with pytest.raises(CommonException, match="No datastore provides capabilities"):
         service.get_featured_datastore("timeseries")
 
 
 def test_get_featured_datastore_with_no_requirements_uses_first() -> None:
     """Service with no datastore requirements can use any datastore."""
-    inmemory = InMemoryDatastore()
+    null_ds = NullDatastore()
 
     service = MockServiceNoDatastoreRequirements(
         module_dir=Path("/tmp"),
         providers=[],
-        datastores=[inmemory],
+        datastores=[null_ds],
     )
 
     # No requirements, so accessing datastores directly works
-    assert next(iter(service.datastores)) == inmemory
+    assert next(iter(service.datastores)) == null_ds
 
 
-def test_service_with_optional_timeseries_succeeds_with_inmemory() -> None:
-    """Service with optional timeseries requirement works with InMemory."""
-    inmemory = InMemoryDatastore()
+def test_service_with_optional_timeseries_succeeds_with_null_datastore() -> None:
+    """Service with optional timeseries requirement works with NullDatastore."""
+    null_ds = NullDatastore()
 
     # This should not raise because timeseries is optional
     service = MockServiceWithOptionalTimeseries(
         module_dir=Path("/tmp"),
         providers=[],
-        datastores=[inmemory],
+        datastores=[null_ds],
     )
 
     # Service was created successfully
-    assert service.datastores == [inmemory]
+    assert service.datastores == [null_ds]
 
 
 # =============================================================================

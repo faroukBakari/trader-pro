@@ -125,4 +125,3 @@ For design philosophy, quality tests, prompt types (routing vs task), templates,
 - [VS Code Prompt Files Documentation](https://code.visualstudio.com/docs/copilot/customization/prompt-files)
 - [GitHub Blog — Better Prompts](https://github.blog/developer-skills/github/how-to-write-better-prompts-for-github-copilot/)
 - [GitHub Copilot Chat Cookbook](https://docs.github.com/en/copilot/example-prompts-for-github-copilot-chat)
-- [awesome-copilot](https://github.com/github/awesome-copilot)

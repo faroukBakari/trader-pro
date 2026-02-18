@@ -165,7 +165,7 @@ def create_test_app(
     Args:
         enabled_modules: List of module names to enable (e.g., ["broker", "datafeed"])
                         If None, all modules are enabled.
-        enabled_datastores: List of datastore names (defaults to ["inmemory"] for tests)
+        enabled_datastores: List of datastore names (defaults to ["duckdb"] for tests)
 
     Returns:
         ModularApp: Modular application (extends FastAPI)
@@ -181,7 +181,7 @@ def create_test_app(
         app = create_test_app(enabled_modules=[])
     """
     if enabled_datastores is None:
-        enabled_datastores = ["inmemory"]  # Default to inmemory for tests
+        enabled_datastores = ["duckdb"]  # Default to duckdb for tests
     factory = AppFactory()
     return asyncio.get_event_loop().run_until_complete(
         factory.create_app(

@@ -277,7 +277,7 @@ async def datafeed_only_app() -> ModularApp:
 
     factory = AppFactory()
     app = await factory.create_app(
-        enabled_module_names=["datafeed"], enabled_datastores=["inmemory"]
+        enabled_module_names=["datafeed"], enabled_datastores=["duckdb"]
     )
     await app.build_modules()
     return app
@@ -290,7 +290,7 @@ async def broker_only_app() -> ModularApp:
 
     factory = AppFactory()
     app = await factory.create_app(
-        enabled_module_names=["broker"], enabled_datastores=["inmemory"]
+        enabled_module_names=["broker"], enabled_datastores=["duckdb"]
     )
     await app.build_modules()
     return app
@@ -302,7 +302,7 @@ async def all_modules_app() -> ModularApp:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    app = await factory.create_app(enabled_datastores=["inmemory"])
+    app = await factory.create_app(enabled_datastores=["duckdb"])
     await app.build_modules()
     return app
 
@@ -366,7 +366,7 @@ async def apps() -> ModularApp:
     from pathlib import Path
 
     from trading_api.app_factory import ModularApp
-    from trading_api.datastores import InMemoryDatastore
+    from trading_api.datastores import create_memory_datastore
     from trading_api.shared import ModuleApp, ModuleRegistry, ProviderRegistry, settings
 
     modules_dir = Path(__file__).parents[2] / "src" / "trading_api" / "modules"
@@ -391,7 +391,7 @@ async def apps() -> ModularApp:
     required_providers = await provider_registry.get_providers(required_capabilities)
 
     # Create shared datastore for auth module
-    datastore = InMemoryDatastore()
+    datastore = create_memory_datastore()
 
     # Instantiate modules with mock providers and datastore
     enabled_modules = module_registry.get_modules(

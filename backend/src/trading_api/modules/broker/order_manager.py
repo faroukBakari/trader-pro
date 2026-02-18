@@ -1,7 +1,7 @@
 """
-Order Manager — service-layer bracket clustering.
+Order Manager — service-layer bracket clustering with datastore persistence.
 
-Maintains an in-memory set of all PlacedOrders and enriches parent orders
+Maintains a persistent set of all PlacedOrders and enriches parent orders
 with bracket context (takeProfit, stopLoss, trailingStopPips) derived from
 their child orders. Both REST and WS paths read from / write to this single
 enriched state, making bracket clustering a set operation — always.
@@ -22,6 +22,7 @@ Position bracket reclassification:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, cast
 
 from trading_api.models.broker.orders import (
     OrderStatus,
@@ -30,40 +31,51 @@ from trading_api.models.broker.orders import (
     PlacedOrder,
     StopType,
 )
+from trading_api.shared.datastore_interface import TableInterface
+
+if TYPE_CHECKING:
+    from trading_api.shared import DatastoreInterface
 
 logger = logging.getLogger(__name__)
 
 
 class OrderManager:
-    """In-memory order state with bracket cluster enrichment.
+    """Order state with bracket cluster enrichment.
 
     Upsert individual orders (WS path) or bulk-sync (REST path).
     Both paths return PlacedOrders with bracket fields enriched from
     child orders in the same cluster.
     """
 
-    def __init__(self) -> None:
-        self._orders: dict[str, PlacedOrder] = {}
+    def __init__(self, datastore: "DatastoreInterface") -> None:
+        """Initialize with datastore for order persistence.
+
+        Args:
+            datastore: Any DatastoreInterface — OrderManager creates its own table.
+        """
+        self._orders_table: TableInterface[PlacedOrder] = cast(
+            TableInterface[PlacedOrder], datastore.table(PlacedOrder)
+        )
 
     # ── Public API ──────────────────────────────────────────────────────
 
-    def upsert(self, order: PlacedOrder) -> list[PlacedOrder]:
+    async def upsert(self, order: PlacedOrder) -> list[PlacedOrder]:
         """Upsert order, enrich its bracket cluster, return affected orders.
 
         Returns the upserted order plus any orders whose enriched
         representation changed. Empty list means no observable change
         (prevents double emissions on the WS path).
         """
-        prev = self._orders.get(order.id)
+        prev = await self._orders_table.get(order.id)
 
         # Reclassify ORDER bracket → POSITION if parent is FILLED in state.
         # On the WS path we only reclassify when the parent is present and
         # confirmed FILLED (missing parent = hasn't arrived yet, not cold start).
-        order = self._maybe_reclassify(order)
+        order = await self._maybe_reclassify(order)
 
-        self._orders[order.id] = order
+        await self._orders_table.set(order.id, order)
 
-        affected = self._enrich_bracket_cluster(order)
+        affected = await self._enrich_bracket_cluster(order)
 
         # If reclassified from ORDER→POSITION, the old parent may have stale
         # bracket enrichment from when this child was still an ORDER bracket.
@@ -73,11 +85,11 @@ class OrderManager:
             and prev.parentType == ParentType.ORDER
             and order.parentType == ParentType.POSITION
             and prev.parentId is not None
-            and prev.parentId in self._orders
+            and (await self._orders_table.exists(prev.parentId))
         ):
-            old_parent = self._orders[prev.parentId]
-            new_parent = self._enrich_parent(prev.parentId)
-            if new_parent != old_parent:
+            old_parent = await self._orders_table.get(prev.parentId)
+            new_parent = await self._enrich_parent(prev.parentId)
+            if old_parent and new_parent != old_parent:
                 affected.append(new_parent)
 
         # If nothing changed (same order re-upserted, no cluster change),
@@ -87,34 +99,45 @@ class OrderManager:
 
         # Always include the upserted order + any additionally changed orders.
         result_ids: set[str] = {order.id}
-        result: list[PlacedOrder] = [self._orders[order.id]]
+        current_order = await self._orders_table.get(order.id)
+        result: list[PlacedOrder] = [current_order] if current_order else []
         for a in affected:
             if a.id not in result_ids:
                 result.append(a)
                 result_ids.add(a.id)
         return result
 
-    def sync(self, orders: list[PlacedOrder]) -> None:
+    async def sync(self, orders: list[PlacedOrder]) -> None:
         """Bulk replace state (for initial load / REST refresh).
 
         Reclassifies position brackets (parent FILLED or missing) then
         enriches all remaining order brackets.
         """
-        self._orders = {o.id: o for o in orders}
-        self._reclassify_position_brackets()
-        self._enrich_all()
+        # Clear existing orders
+        await self._orders_table.clear()
+        # Insert all new orders
+        for o in orders:
+            await self._orders_table.set(o.id, o)
+        await self._reclassify_position_brackets()
+        await self._enrich_all()
 
-    def get_all(self) -> list[PlacedOrder]:
+    async def get(self, order_id: str) -> PlacedOrder | None:
+        """Get a single order by ID (enriched copy), or None."""
+        order = await self._orders_table.get(order_id)
+        return order.model_copy() if order else None
+
+    async def get_all(self) -> list[PlacedOrder]:
         """Return all orders (copies — mutations don't affect internal state)."""
-        return [o.model_copy() for o in self._orders.values()]
+        orders = await self._orders_table.values()
+        return [o.model_copy() for o in orders]
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         """Reset state."""
-        self._orders.clear()
+        await self._orders_table.clear()
 
     # ── Position Bracket Reclassification (private) ─────────────────────
 
-    def _reclassify_position_brackets(self) -> None:
+    async def _reclassify_position_brackets(self) -> None:
         """Reclassify ORDER children whose parent is FILLED or missing.
 
         Called in sync() where all orders are available simultaneously.
@@ -123,10 +146,11 @@ class OrderManager:
         POSITION brackets: parentId=symbol, parentType=POSITION.
         """
         updates: dict[str, PlacedOrder] = {}
-        for order in self._orders.values():
+        all_orders = await self._orders_table.values()
+        for order in all_orders:
             if order.parentType != ParentType.ORDER or order.parentId is None:
                 continue
-            parent = self._orders.get(order.parentId)
+            parent = await self._orders_table.get(order.parentId)
             if parent is None or parent.status == OrderStatus.FILLED:
                 updates[order.id] = order.model_copy(
                     update={
@@ -134,9 +158,11 @@ class OrderManager:
                         "parentType": ParentType.POSITION,
                     }
                 )
-        self._orders.update(updates)
+        # Apply all updates
+        for order_id, updated_order in updates.items():
+            await self._orders_table.set(order_id, updated_order)
 
-    def _maybe_reclassify(self, order: PlacedOrder) -> PlacedOrder:
+    async def _maybe_reclassify(self, order: PlacedOrder) -> PlacedOrder:
         """Reclassify a single ORDER bracket if parent is FILLED in state.
 
         Used on the WS path (upsert). Only checks parents already in state —
@@ -144,7 +170,7 @@ class OrderManager:
         """
         if order.parentType != ParentType.ORDER or order.parentId is None:
             return order
-        parent = self._orders.get(order.parentId)
+        parent = await self._orders_table.get(order.parentId)
         if parent is not None and parent.status == OrderStatus.FILLED:
             return order.model_copy(
                 update={
@@ -156,13 +182,13 @@ class OrderManager:
 
     # ── Bracket Enrichment (private) ────────────────────────────────────
 
-    def _enrich_all(self) -> None:
+    async def _enrich_all(self) -> None:
         """Re-derive bracket fields for every parent in state."""
-        parent_ids = self._find_all_parent_ids()
+        parent_ids = await self._find_all_parent_ids()
         for parent_id in parent_ids:
-            self._enrich_parent(parent_id)
+            await self._enrich_parent(parent_id)
 
-    def _enrich_bracket_cluster(self, order: PlacedOrder) -> list[PlacedOrder]:
+    async def _enrich_bracket_cluster(self, order: PlacedOrder) -> list[PlacedOrder]:
         """Enrich the bracket cluster that `order` belongs to.
 
         Returns list of orders whose enriched state changed (excluding
@@ -174,30 +200,30 @@ class OrderManager:
         if order.parentId is not None and order.parentType == ParentType.ORDER:
             # This is an ORDER bracket child — enrich its parent (if in state)
             parent_id = order.parentId
-            if parent_id in self._orders:
-                old_parent = self._orders[parent_id]
-                new_parent = self._enrich_parent(parent_id)
-                if new_parent != old_parent:
+            if await self._orders_table.exists(parent_id):
+                old_parent = await self._orders_table.get(parent_id)
+                new_parent = await self._enrich_parent(parent_id)
+                if old_parent and new_parent != old_parent:
                     changed.append(new_parent)
         elif order.parentId is None or order.parentType is None:
             # This order might be a parent — enrich it from its children
-            old = self._orders[order.id]
-            new = self._enrich_parent(order.id)
-            if new != old:
+            old = await self._orders_table.get(order.id)
+            new = await self._enrich_parent(order.id)
+            if old and new != old:
                 changed.append(new)
 
         return changed
 
-    def _enrich_parent(self, parent_id: str) -> PlacedOrder:
+    async def _enrich_parent(self, parent_id: str) -> PlacedOrder:
         """Derive bracket fields on parent from its ORDER bracket children.
 
         Returns the (potentially updated) parent order.
         """
-        parent = self._orders.get(parent_id)
+        parent = await self._orders_table.get(parent_id)
         if parent is None:
             raise KeyError(f"Parent {parent_id} not in state")
 
-        children = self._find_children(parent_id)
+        children = await self._find_children(parent_id)
 
         take_profit: float | None = None
         stop_loss: float | None = None
@@ -231,25 +257,27 @@ class OrderManager:
                 "stopType": stop_type,
             }
         )
-        self._orders[parent_id] = enriched
+        await self._orders_table.set(parent_id, enriched)
         return enriched
 
-    def _find_children(self, parent_id: str) -> list[PlacedOrder]:
+    async def _find_children(self, parent_id: str) -> list[PlacedOrder]:
         """Find all ORDER bracket children whose parentId matches."""
+        all_orders = await self._orders_table.values()
         return [
             o
-            for o in self._orders.values()
+            for o in all_orders
             if o.parentId == parent_id and o.parentType == ParentType.ORDER
         ]
 
-    def _find_all_parent_ids(self) -> set[str]:
+    async def _find_all_parent_ids(self) -> set[str]:
         """Collect all unique parent IDs referenced by ORDER bracket children."""
         ids: set[str] = set()
-        for o in self._orders.values():
+        all_orders = await self._orders_table.values()
+        for o in all_orders:
             if (
                 o.parentId is not None
                 and o.parentType == ParentType.ORDER
-                and o.parentId in self._orders
+                and (await self._orders_table.exists(o.parentId))
             ):
                 ids.add(o.parentId)
         return ids

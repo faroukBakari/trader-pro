@@ -2,7 +2,7 @@
 
 [ARCHITECTURE] Wave 2B: Unified table() API
 - PostgresDatastore: Auto-detects table=True → SQLModelTable with typed columns
-- InMemoryDatastore: Uses extracted Field() metadata for indexes
+- DuckDBDatastore: Uses extracted Field() metadata for indexes
 """
 
 import uuid
@@ -21,7 +21,7 @@ def _to_model(result: Any, model_class: type[T]) -> T | None:
     """Convert table result to Pydantic model.
 
     Handles both:
-    - InMemoryDatastore: returns BaseModel directly
+    - DuckDBDatastore: returns BaseModel directly
     - PostgresDatastore: returns dict (needs model_validate)
 
     Args:
@@ -45,7 +45,7 @@ class UserRepository:
 
     [ARCHITECTURE] Wave 2B: Unified table() API
     - PostgresDatastore: Auto-routes to SQLModelTable (User has table=True)
-    - InMemoryDatastore: Extracts indexes from Field(index=True, unique=True)
+    - DuckDBDatastore: Extracts indexes from Field(index=True, unique=True)
     """
 
     def __init__(self, datastore: DatastoreInterface) -> None:
@@ -104,7 +104,7 @@ class RefreshTokenRepository:
 
     [ARCHITECTURE] Wave 2B: Unified table() API
     - PostgresDatastore: Auto-routes to SQLModelTable (RefreshTokenData has table=True)
-    - InMemoryDatastore: Extracts indexes from Field(index=True)
+    - DuckDBDatastore: Extracts indexes from Field(index=True)
     """
 
     def __init__(self, datastore: DatastoreInterface) -> None:
@@ -150,9 +150,13 @@ class RefreshTokenRepository:
             "user_id": token_data.user_id,
         }
 
-    async def revoke_token(self, token_hash: str) -> None:
-        """Revoke a specific refresh token"""
-        await self._table.delete(token_hash)
+    async def revoke_token(self, token_hash: str) -> bool:
+        """Revoke a specific refresh token.
+
+        Returns:
+            True if the token existed and was deleted, False if already revoked.
+        """
+        return await self._table.delete(token_hash)
 
     async def revoke_all_user_tokens(self, user_id: str) -> None:
         """Revoke all refresh tokens for a user"""

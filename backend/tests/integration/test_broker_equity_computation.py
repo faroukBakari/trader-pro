@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from trading_api.datastores import InMemoryDatastore
+from trading_api.datastores import create_memory_datastore
 from trading_api.models.broker import OrderType, PreOrder, Side
 from trading_api.models.providers.fake_broker_configs import FakeBrokerProviderConfig
 from trading_api.modules.broker.service import BrokerService
@@ -58,7 +58,7 @@ def broker_service() -> BrokerService:
         execution_delay_max=0.02,
     )
     provider = FakeBrokerProvider(config=config)
-    datastore = InMemoryDatastore()
+    datastore = create_memory_datastore()
 
     service = BrokerService(
         module_dir=module_dir, providers=[provider], datastores=[datastore]

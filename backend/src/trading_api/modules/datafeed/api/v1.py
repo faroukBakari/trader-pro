@@ -127,14 +127,18 @@ class DatafeedApi(APIRouterInterface):
             - **to_time**: End timestamp in seconds
             - **count_back**: Number of bars to count back (optional)
             """
-            bars = await self.service.get_bars(
+            result = await self.service.get_bars(
                 ticker=symbol,
                 resolution=resolution,
                 from_time=from_time,
                 to_time=to_time,
                 count_back=count_back,
             )
-            return GetBarsResponse(bars=bars, no_data=False)  # len(bars) == 0
+            return GetBarsResponse(
+                bars=result.bars,
+                no_data=len(result.bars) == 0,
+                next_time=result.next_time,
+            )
 
         @self.post(
             "/quotes",

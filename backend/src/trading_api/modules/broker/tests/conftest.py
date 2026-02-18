@@ -42,7 +42,7 @@ async def apps() -> ModularApp:
     # Auto-discover broker and auth modules with fakebroker and google providers
     module_registry.auto_discover(enabled_modules=["broker", "auth"])
     provider_registry.auto_discover(enabled_names=["fakebroker", "google"])
-    datastore_registry.auto_discover(enabled_names=["inmemory"])
+    datastore_registry.auto_discover(enabled_names=["duckdb"])
 
     # Create datastore using async/await (avoid asyncio.get_event_loop() for Python 3.10+)
     datastores = await datastore_registry.get_datastores()
@@ -62,7 +62,7 @@ async def apps() -> ModularApp:
         base_url=settings.API_PREFIX,
         enabled_modules=["broker", "auth"],
         enabled_providers=["fakebroker", "google"],
-        enabled_datastores=["inmemory"],
+        enabled_datastores=["duckdb"],
         title="Trading API (Test)",
         version="1.0.0",
     )

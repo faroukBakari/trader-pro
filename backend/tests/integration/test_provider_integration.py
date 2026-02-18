@@ -28,7 +28,7 @@ async def test_provider_injection_into_modules():
     """Providers injected into modules requiring capabilities."""
     factory = AppFactory()
     app = await factory.create_app(
-        enabled_module_names=["auth"], enabled_datastores=["inmemory"]
+        enabled_module_names=["auth"], enabled_datastores=["duckdb"]
     )
 
     # Call build_modules() to populate runtime state (normally done in lifespan)
@@ -55,7 +55,7 @@ async def test_auth_service_uses_provider():
     """AuthService uses injected provider for authentication."""
     factory = AppFactory()
     app = await factory.create_app(
-        enabled_module_names=["auth"], enabled_datastores=["inmemory"]
+        enabled_module_names=["auth"], enabled_datastores=["duckdb"]
     )
 
     # Call build_modules() to populate runtime state (normally done in lifespan)
@@ -83,7 +83,7 @@ async def test_create_app_two_phase_loading():
     """Verify two-phase loading pattern works correctly - registries populated after create."""
     factory = AppFactory()
     app = await factory.create_app(
-        enabled_module_names=["auth"], enabled_datastores=["inmemory"]
+        enabled_module_names=["auth"], enabled_datastores=["duckdb"]
     )
 
     # Call build_modules() to populate runtime state (normally done in lifespan)
@@ -103,7 +103,7 @@ async def test_provider_lifecycle_hooks():
     """Verify provider lifecycle hooks are called."""
     factory = AppFactory()
     app = await factory.create_app(
-        enabled_module_names=["auth"], enabled_datastores=["inmemory"]
+        enabled_module_names=["auth"], enabled_datastores=["duckdb"]
     )
 
     # Call build_modules() to populate runtime state (normally done in lifespan)
