@@ -31,7 +31,10 @@ class TestClassifyError:
             2106,  # Historical data farm is connected
             2107,  # Historical data farm connection inactive (dormant)
             2108,  # Market data farm connection inactive (dormant)
+            2109,  # Outside RTH attribute ignored (order continues)
             2158,  # Sec-def data farm connection is OK
+            2168,  # EtradeOnly not supported (attribute ignored)
+            2169,  # FirmQuoteOnly not supported (attribute ignored)
         ],
     )
     def test_info_codes_are_recoverable(self, error_code: int) -> None:
@@ -258,6 +261,8 @@ class TestClassifyErrorNature:
             202,  # Order cancelled
             399,  # Order message error
             400,  # Algo order error
+            2102,  # Unable to modify order (processing)
+            2137,  # Cross side warning
             10006,  # Missing parent order
             10148,  # Order cannot be cancelled, wrong state
         ],
@@ -332,10 +337,13 @@ class TestClassifyErrorNature:
             1100,  # Connectivity lost
             1101,  # Connectivity restored, data lost
             1102,  # Connectivity restored, data maintained
+            2100,  # New account data requested
+            2101,  # Unable to subscribe to account
             2103,  # Market data farm disconnected
             2104,  # Market data farm connection OK
             2105,  # Historical data farm disconnected
             2106,  # Historical data farm connected
+            2110,  # TWS-server connection broken
             2158,  # Sec-def data farm connection OK
         ],
     )
@@ -398,3 +406,35 @@ class TestTWSErrorNatureConstants:
         assert TWSErrorNature.REQUEST == "req"
         assert TWSErrorNature.ORDER == "order"
         assert TWSErrorNature.SYSTEM == "system"
+
+
+class TestBracketOrderErrorReclassification:
+    """Verify error codes reclassified for bracket order fix (2109 et al)."""
+
+    def test_2109_is_info_category(self) -> None:
+        """2109 (Outside RTH ignored) → INFO early-return, not error dispatch."""
+        nature, category, recoverable = classify_error(2109)
+        assert category == TWSErrorClassification.INFO
+        assert recoverable is True
+
+    def test_2168_is_info_category(self) -> None:
+        """2168 (EtradeOnly not supported) → INFO early-return."""
+        nature, category, recoverable = classify_error(2168)
+        assert category == TWSErrorClassification.INFO
+        assert recoverable is True
+
+    def test_2169_is_info_category(self) -> None:
+        """2169 (FirmQuoteOnly not supported) → INFO early-return."""
+        nature, category, recoverable = classify_error(2169)
+        assert category == TWSErrorClassification.INFO
+        assert recoverable is True
+
+    def test_2102_is_order_nature(self) -> None:
+        """2102 (Unable to modify order) → ORDER nature for caller dispatch."""
+        nature, category, recoverable = classify_error(2102)
+        assert nature == TWSErrorNature.ORDER
+
+    def test_2137_is_order_nature(self) -> None:
+        """2137 (Cross side warning) → ORDER nature for caller dispatch."""
+        nature, category, recoverable = classify_error(2137)
+        assert nature == TWSErrorNature.ORDER

@@ -340,6 +340,8 @@ class OrderTracker(OrderTrackerCBWiringInterface):
         - Subscription: subscribeOpenOrders() → register_order_hook() → dispatch_update()
     """
 
+    DEFAULT_ORDER_TIMEOUT: float = 30.0
+
     def __init__(self, ibsocket: IbSocketWiringInterface) -> None:
         nxt_valid_order_id = ibsocket.wire_order_tracker(self)
         self.__order_id_count = (
@@ -479,28 +481,60 @@ class OrderTracker(OrderTrackerCBWiringInterface):
                     stream_callback(tracked),
                 )
 
+    def __register_hook(
+        self, orderId: int
+    ) -> tuple[str, asyncio.Future["TrackedOrder"]]:
+        """Register a hook future for orderId (sync, no await).
+
+        Must be called BEFORE placing the order to avoid a race where TWS
+        responds (reader thread → __notify_hooks) before the hook exists.
+
+        Returns:
+            (key, future) — pass to __await_hook after placement.
+        """
+        key = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[TrackedOrder] = loop.create_future()
+        self._order_hooks.setdefault(orderId, {})[key] = (loop, future)
+        return key, future
+
+    async def __await_hook(
+        self,
+        orderId: int,
+        key: str,
+        future: asyncio.Future["TrackedOrder"],
+        timeout: float | None = None,
+    ) -> TrackedOrder:
+        """Await a previously registered hook future.
+
+        Args:
+            orderId: TWS order ID the hook is registered for
+            key: Hook key from __register_hook
+            future: Future from __register_hook
+            timeout: Optional timeout in seconds
+        """
+        try:
+            return await asyncio.wait_for(
+                future,
+                timeout if timeout is not None else self.DEFAULT_ORDER_TIMEOUT,
+            )
+        finally:
+            self._order_hooks.get(orderId, {}).pop(key, None)
+
     async def __order_update(
         self, orderId: int, timeout: float | None = None
     ) -> TrackedOrder:
         """Register a future to be resolved on next update for orderId.
 
-        Called from main thread.
+        Called from main thread. For new code prefer __register_hook +
+        __await_hook to avoid the submit-before-hook race condition.
 
         Args:
             orderId: TWS order ID to wait for
             timeout: Optional timeout in seconds for the update
         """
-
-        key = str(uuid.uuid4())
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[TrackedOrder] = loop.create_future()
-
-        self._order_hooks.setdefault(orderId, {})[key] = (loop, future)
-
-        try:
-            return await asyncio.wait_for(future, timeout)
-        finally:
-            self._order_hooks.get(orderId, {}).pop(key, None)
+        key, future = self.__register_hook(orderId)
+        return await self.__await_hook(orderId, key, future, timeout)
 
     # --- Reset Helper for testing ---
     def reset(self) -> None:
@@ -548,13 +582,18 @@ class OrderTracker(OrderTrackerCBWiringInterface):
                 f"qty={order.totalQuantity}, price={order.lmtPrice or order.auxPrice} "
             )
 
-    def __submit_order(
+    def __prepare_order(
         self,
         contract: Contract,
         order: Order,
         parent_id: int = 0,
         transmit: bool = False,
-    ) -> tuple[int, bool]:
+    ) -> tuple[int, bool, Contract, Order]:
+        """Allocate order ID and prepare the Order object without sending.
+
+        Returns:
+            (order_id, needs_placement, contract, prepared_order)
+        """
         order_id = order.orderId
         place_flag = True
         tracked: TrackedOrder | None = self.__find_tracked_order(
@@ -595,9 +634,25 @@ class OrderTracker(OrderTrackerCBWiringInterface):
             order.parentId = parent_id
             order.transmit = transmit
 
+        return order_id, place_flag, contract, order
+
+    def __submit_order(
+        self,
+        contract: Contract,
+        order: Order,
+        parent_id: int = 0,
+        transmit: bool = False,
+    ) -> tuple[int, bool]:
+        """Prepare and immediately place an order (legacy convenience wrapper).
+
+        For race-safe placement, prefer __prepare_order + __register_hook +
+        __placeOrder + __await_hook sequence.
+        """
+        order_id, place_flag, contract, order = self.__prepare_order(
+            contract, order, parent_id=parent_id, transmit=transmit
+        )
         if place_flag:
             self.__placeOrder(order_id, contract, order)
-
         return order_id, place_flag
 
     def __cancelOrder(self, order_id: int) -> None:
@@ -750,6 +805,34 @@ class OrderTracker(OrderTrackerCBWiringInterface):
 
                 loop.call_soon_threadsafe(resolve_order_error, future, exception)
 
+    def has_order(self, order_id: int) -> bool:
+        """Check if an order ID is tracked (known order or pending hook)."""
+        return order_id in self._orders or order_id in self._order_hooks
+
+    def raise_error_for_order(
+        self, order_id: int, exception: ProviderException
+    ) -> bool:
+        """Dispatch error to hooks for a specific order ID only.
+
+        Unlike raise_error() which broadcasts to ALL futures, this targets
+        only the futures waiting on the given order_id.
+
+        Returns True if any hooks were notified.
+        """
+        hooks = self._order_hooks.get(order_id, {})
+        if not hooks:
+            return False
+
+        for loop, future in hooks.values():
+
+            def resolve_error(fut: asyncio.Future, exc: ProviderException) -> None:
+                if not fut.done():
+                    fut.set_exception(exc)
+
+            loop.call_soon_threadsafe(resolve_error, future, exception)
+
+        return True
+
     def mark_snapshot_complete(self) -> None:
         """Mark snapshot as complete. Called from openOrderEnd."""
         self._snapshot_complete.set()
@@ -781,15 +864,19 @@ class OrderTracker(OrderTrackerCBWiringInterface):
         loop = asyncio.get_running_loop()
         future: asyncio.Future[list[TrackedOrder]] = loop.create_future()
 
+        effective_timeout = (
+            timeout if timeout is not None else self.DEFAULT_ORDER_TIMEOUT
+        )
+
         if self._snapshot_complete.is_set():
             future.set_result(list(self._orders.values()))
-            return await asyncio.wait_for(future, timeout)
+            return await asyncio.wait_for(future, effective_timeout)
 
         key = str(uuid.uuid4())
         self._snapshot_hooks[key] = (loop, future)
 
         try:
-            return await asyncio.wait_for(future, timeout)
+            return await asyncio.wait_for(future, effective_timeout)
         finally:
             self._snapshot_hooks.pop(key, None)
 
@@ -874,28 +961,43 @@ class OrderTracker(OrderTrackerCBWiringInterface):
             order.ocaGroup = signed_oca_group
             order.ocaType = oca_type
 
-        submit_results = [
-            self.__submit_order(
+        # Phase 1: Prepare all orders (allocate IDs, build Order objects)
+        prepared = [
+            self.__prepare_order(
                 contract, order, parent_id=parent_id, transmit=transmit_all
             )
             for order in order_list[:-1]
         ]
-        submit_results.append(
-            self.__submit_order(
+        prepared.append(
+            self.__prepare_order(
                 contract, order_list[-1], parent_id=parent_id, transmit=True
             )
         )
 
+        # Phase 2: Register hooks BEFORE placement so TWS callbacks
+        # (reader thread) always find a hook to resolve — eliminates the
+        # race where TWS responds before hooks exist.
+        hooks: list[tuple[int, str, asyncio.Future[TrackedOrder]]] = []
+        for oid, needs_place, _, _ in prepared:
+            if needs_place:
+                key, future = self.__register_hook(oid)
+                hooks.append((oid, key, future))
+
+        # Phase 3: Send all orders to TWS
+        for oid, needs_place, prep_contract, prep_order in prepared:
+            if needs_place:
+                self.__placeOrder(oid, prep_contract, prep_order)
+
+        # Phase 4: Await hooks (futures already registered)
         tracked_list = await asyncio.gather(
             *[
-                self.__order_update(oid, timeout=timeout)
-                for oid, placed in submit_results
-                if placed
+                self.__await_hook(oid, key, future, timeout=timeout)
+                for oid, key, future in hooks
             ]
         ) + [
             self.__assert_order_exists(oid)
-            for oid, placed in submit_results
-            if not placed
+            for oid, needs_place, _, _ in prepared
+            if not needs_place
         ]
 
         return list(tracked_list)
@@ -920,9 +1022,18 @@ class OrderTracker(OrderTrackerCBWiringInterface):
         Returns:
             Tuple of (parent TrackedOrder, list of child TrackedOrders)
         """
-        parent_id, placed = self.__submit_order(
-            contract, parent, transmit=(not children)
-        )
+        # Prepare parent (allocate ID) and register hook BEFORE placement
+        (
+            parent_id,
+            parent_needs_place,
+            parent_contract,
+            parent_order,
+        ) = self.__prepare_order(contract, parent, transmit=(not children))
+
+        parent_hook: tuple[str, asyncio.Future[TrackedOrder]] | None = None
+        if parent_needs_place:
+            parent_hook = self.__register_hook(parent_id)
+            self.__placeOrder(parent_id, parent_contract, parent_order)
 
         children_tracked: list[TrackedOrder] = []
         if children:
@@ -932,11 +1043,12 @@ class OrderTracker(OrderTrackerCBWiringInterface):
                 oca_group=f"brackets_{parent_id}",
                 oca_type=1,
                 parent_id=parent_id,
+                timeout=timeout,
             )
 
         parent_tracked = (
-            (await self.__order_update(parent_id, timeout=timeout))
-            if placed
+            (await self.__await_hook(parent_id, *parent_hook, timeout=timeout))
+            if parent_hook is not None
             else self.__assert_order_exists(parent_id)
         )
 

@@ -136,6 +136,16 @@ class OrderTrackerCBWiringInterface(ABC):
     def raise_error(self, exception: ProviderException) -> None:
         ...
 
+    @abstractmethod
+    def has_order(self, order_id: int) -> bool:
+        ...
+
+    @abstractmethod
+    def raise_error_for_order(
+        self, order_id: int, exception: ProviderException
+    ) -> bool:
+        ...
+
 
 class AccountTrackerCBWiringInterface(ABC):
     @abstractmethod

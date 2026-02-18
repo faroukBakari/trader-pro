@@ -19,6 +19,7 @@ import pytest
 from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
+from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.tws_connection import (
     IBSocket,
     IBSocketState,
@@ -201,6 +202,52 @@ class TestIBSocketErrorCallback:
             errorCode=2104,
             errorString="Market data farm connection is OK",
         )
+
+    def test_system_error_with_tracked_order_routes_to_order(
+        self, running_ibsocket: IBSocket
+    ) -> None:
+        """SYSTEM error with valid reqId matching tracked order → raise_error_for_order."""
+        # Wire a mock order tracker that knows about order 42
+        mock_order_tracker = MagicMock()
+        mock_order_tracker.has_order.return_value = True
+        mock_order_tracker.raise_error_for_order.return_value = True
+        running_ibsocket._IBSocket__order_tracker = mock_order_tracker  # type: ignore[attr-defined]
+
+        # Send a SYSTEM-nature error with reqId=42 (e.g. an unknown 2xxx code)
+        # Use code 2199 which is not in any classified set, falls to SYSTEM via heuristic
+        running_ibsocket.error(
+            reqId=42,
+            errorTime=1702656000000,
+            errorCode=2199,
+            errorString="Some unknown system warning",
+        )
+
+        mock_order_tracker.has_order.assert_called_once_with(42)
+        mock_order_tracker.raise_error_for_order.assert_called_once()
+        call_args = mock_order_tracker.raise_error_for_order.call_args
+        assert call_args[0][0] == 42
+        exc = call_args[0][1]
+        assert isinstance(exc, ProviderException)
+        assert exc.code == "PROVIDER_TWS_2199"
+
+    def test_system_error_without_tracked_order_falls_through(
+        self, running_ibsocket: IBSocket
+    ) -> None:
+        """SYSTEM error with reqId not matching any order → falls to datafeed path."""
+        mock_order_tracker = MagicMock()
+        mock_order_tracker.has_order.return_value = False
+        running_ibsocket._IBSocket__order_tracker = mock_order_tracker  # type: ignore[attr-defined]
+
+        # Should not raise — falls through to datafeed/legacy handling
+        running_ibsocket.error(
+            reqId=42,
+            errorTime=1702656000000,
+            errorCode=2199,
+            errorString="Some unknown system warning",
+        )
+
+        mock_order_tracker.has_order.assert_called_once_with(42)
+        mock_order_tracker.raise_error_for_order.assert_not_called()
 
 
 # =============================================================================

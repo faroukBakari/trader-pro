@@ -1229,6 +1229,24 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             )
             return
 
+        # Fallback: non-ORDER errors with a valid reqId matching a known order
+        # get routed to that specific order's hooks (not broadcast)
+        if (
+            self.__order_tracker is not None
+            and reqId > 0
+            and self.__order_tracker.has_order(reqId)
+        ):
+            self.__order_tracker.raise_error_for_order(
+                reqId,
+                ProviderException(
+                    provider="tws",
+                    capability="broker",
+                    code=f"PROVIDER_TWS_{errorCode}",
+                    message=message,
+                ),
+            )
+            return
+
         # Request-related errors - try bars_tracker first, then quote_err
         datafeed_error = ProviderException(
             provider="tws",

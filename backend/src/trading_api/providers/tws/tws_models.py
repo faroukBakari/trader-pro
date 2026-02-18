@@ -599,7 +599,10 @@ _INFO_CODES: frozenset[int] = frozenset(
         2106,  # Historical data farm is connected
         2107,  # Historical data farm connection inactive (dormant)
         2108,  # Market data farm connection inactive (dormant)
+        2109,  # Outside RTH attribute ignored (order continues)
         2158,  # Sec-def data farm connection is OK
+        2168,  # EtradeOnly not supported (attribute ignored, order continues)
+        2169,  # FirmQuoteOnly not supported (attribute ignored, order continues)
         10349,  # Order TIF auto-adjusted by TWS preset (informational)
     }
 )
@@ -760,6 +763,9 @@ _ORDER_NATURE_CODES: frozenset[int] = frozenset(
         # Order state errors (10xxx)
         10006,  # Missing parent order
         10148,  # Order cannot be cancelled, wrong state
+        # Order warnings (2xxx) — caller needs to know
+        2102,  # Unable to modify order (processing)
+        2137,  # Cross side warning
     }
 )
 
@@ -835,19 +841,14 @@ _SYSTEM_NATURE_CODES: frozenset[int] = frozenset(
         # System warnings (2xxx) - farm connections
         2100,  # New account data requested
         2101,  # Unable to subscribe to account
-        2102,  # Unable to modify order (processing)
         2103,  # Market data farm disconnected
         2104,  # Market data farm connection OK
         2105,  # Historical data farm disconnected
         2106,  # Historical data farm connected
         2107,  # Historical data farm inactive
         2108,  # Market data farm inactive
-        2109,  # Outside RTH attribute ignored
         2110,  # TWS-server connection broken
-        2137,  # Cross side warning
         2158,  # Sec-def data farm connection OK
-        2168,  # EtradeOnly not supported
-        2169,  # FirmQuoteOnly not supported
         # Client ID conflict
         326,  # Client ID already in use
     }
