@@ -1,5 +1,5 @@
 """
-Tests for OrderManager — service-layer bracket clustering.
+Tests for OrderManager — service-layer bracket clustering with DuckDB persistence.
 
 Gate 0: Core state (upsert, sync, get_all, clear)
 Gate 1: BracketContext derivation (bracket enrichment algorithm)
@@ -10,6 +10,7 @@ Gate 4: End-to-end validation (FakeBrokerProvider)
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,8 +18,13 @@ import pytest
 
 if TYPE_CHECKING:
     from trading_api.modules.broker.service import BrokerService
+    from trading_api.shared import DatastoreInterface
 
+from trading_api.datastores.duckdb import create_memory_datastore
 from trading_api.models.broker.orders import (
+    OrderDuration,
+    OrderOrPositionMessage,
+    OrderOrPositionMessageType,
     OrderStatus,
     OrderType,
     ParentType,
@@ -27,6 +33,17 @@ from trading_api.models.broker.orders import (
     StopType,
 )
 from trading_api.modules.broker.order_manager import OrderManager
+
+# ── Fixtures ────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+async def datastore() -> AsyncGenerator["DatastoreInterface"]:
+    """Create in-memory DuckDB datastore for OrderManager tests."""
+    ds = create_memory_datastore()
+    yield ds
+    await ds.close()
+
 
 # ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -46,6 +63,8 @@ def _make_order(
     stop_loss: float | None = None,
     trailing_stop_pips: float | None = None,
     stop_type: StopType | None = None,
+    duration: OrderDuration | None = None,
+    message: OrderOrPositionMessage | None = None,
 ) -> PlacedOrder:
     """Create a PlacedOrder for testing."""
     return PlacedOrder(
@@ -63,6 +82,8 @@ def _make_order(
         stopLoss=stop_loss,
         trailingStopPips=trailing_stop_pips,
         stopType=stop_type,
+        duration=duration,
+        message=message,
     )
 
 
@@ -74,67 +95,108 @@ def _make_order(
 class TestOrderManagerCoreState:
     """Gate 0 — upsert, sync, get_all, clear."""
 
-    def test_upsert_single_order(self) -> None:
+    @pytest.mark.asyncio
+    async def test_upsert_single_order(self, datastore: "DatastoreInterface") -> None:
         """Upsert a single order → get_all returns it."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         order = _make_order(id="100")
 
-        mgr.upsert(order)
+        await mgr.upsert(order)
 
-        result = mgr.get_all()
+        result = await mgr.get_all()
         assert len(result) == 1
         assert result[0].id == "100"
 
-    def test_upsert_updates_existing(self) -> None:
+    @pytest.mark.asyncio
+    async def test_upsert_updates_existing(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """Upsert same ID → replaces the order."""
-        mgr = OrderManager()
-        mgr.upsert(_make_order(id="100", qty=10.0))
-        mgr.upsert(_make_order(id="100", qty=50.0))
+        mgr = OrderManager(datastore=datastore)
+        await mgr.upsert(_make_order(id="100", qty=10.0))
+        await mgr.upsert(_make_order(id="100", qty=50.0))
 
-        result = mgr.get_all()
+        result = await mgr.get_all()
         assert len(result) == 1
         assert result[0].qty == 50.0
 
-    def test_sync_bulk_replace(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sync_bulk_replace(self, datastore: "DatastoreInterface") -> None:
         """sync() replaces entire state."""
-        mgr = OrderManager()
-        mgr.upsert(_make_order(id="1"))
-        mgr.upsert(_make_order(id="2"))
+        mgr = OrderManager(datastore=datastore)
+        await mgr.upsert(_make_order(id="1"))
+        await mgr.upsert(_make_order(id="2"))
 
-        mgr.sync([_make_order(id="10"), _make_order(id="20")])
+        await mgr.sync([_make_order(id="10"), _make_order(id="20")])
 
-        ids = {o.id for o in mgr.get_all()}
+        ids = {o.id for o in await mgr.get_all()}
         assert ids == {"10", "20"}
 
-    def test_get_all_returns_copy(self) -> None:
+    @pytest.mark.asyncio
+    async def test_get_all_returns_copy(self, datastore: "DatastoreInterface") -> None:
         """Mutations on returned orders don't affect internal state."""
-        mgr = OrderManager()
-        mgr.upsert(_make_order(id="100", qty=10.0))
+        mgr = OrderManager(datastore=datastore)
+        await mgr.upsert(_make_order(id="100", qty=10.0))
 
-        result = mgr.get_all()
+        result = await mgr.get_all()
         result.clear()
-        assert len(mgr.get_all()) == 1
+        assert len(await mgr.get_all()) == 1
 
-    def test_clear(self) -> None:
+    @pytest.mark.asyncio
+    async def test_clear(self, datastore: "DatastoreInterface") -> None:
         """clear() empties state."""
-        mgr = OrderManager()
-        mgr.upsert(_make_order(id="1"))
-        mgr.clear()
-        assert mgr.get_all() == []
+        mgr = OrderManager(datastore=datastore)
+        await mgr.upsert(_make_order(id="1"))
+        await mgr.clear()
+        assert await mgr.get_all() == []
 
-    def test_upsert_returns_upserted_order(self) -> None:
+    @pytest.mark.asyncio
+    async def test_get_existing_order(self, datastore: "DatastoreInterface") -> None:
+        """get() returns a copy of the order."""
+        mgr = OrderManager(datastore=datastore)
+        await mgr.upsert(_make_order(id="42", symbol="MSFT"))
+        result = await mgr.get("42")
+        assert result is not None
+        assert result.id == "42"
+        assert result.symbol == "MSFT"
+
+    @pytest.mark.asyncio
+    async def test_get_missing_order(self, datastore: "DatastoreInterface") -> None:
+        """get() returns None for unknown order ID."""
+        mgr = OrderManager(datastore=datastore)
+        assert await mgr.get("nonexistent") is None
+
+    @pytest.mark.asyncio
+    async def test_get_returns_copy(self, datastore: "DatastoreInterface") -> None:
+        """get() returns a copy — mutations don't affect internal state."""
+        mgr = OrderManager(datastore=datastore)
+        await mgr.upsert(_make_order(id="42"))
+        result = await mgr.get("42")
+        assert result is not None
+        result.symbol = "MUTATED"
+        original = await mgr.get("42")
+        assert original is not None
+        assert original.symbol == "AAPL"
+
+    @pytest.mark.asyncio
+    async def test_upsert_returns_upserted_order(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """Upsert always returns the upserted order itself."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         order = _make_order(id="100")
-        result = mgr.upsert(order)
+        result = await mgr.upsert(order)
         assert len(result) == 1
         assert result[0].id == "100"
 
-    def test_upsert_returns_child_and_enriched_parent(self) -> None:
+    @pytest.mark.asyncio
+    async def test_upsert_returns_child_and_enriched_parent(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """When child arrives, both child AND enriched parent are returned."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         parent = _make_order(id="100", type=OrderType.MARKET)
-        mgr.upsert(parent)
+        await mgr.upsert(parent)
 
         sl_child = _make_order(
             id="101",
@@ -144,20 +206,82 @@ class TestOrderManagerCoreState:
             parent_id="100",
             parent_type=ParentType.ORDER,
         )
-        result = mgr.upsert(sl_child)
+        result = await mgr.upsert(sl_child)
 
         result_ids = {o.id for o in result}
         assert "101" in result_ids, "Child must be in result"
         assert "100" in result_ids, "Enriched parent must be in result"
 
-    def test_upsert_duplicate_returns_empty(self) -> None:
+    @pytest.mark.asyncio
+    async def test_upsert_duplicate_returns_empty(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """Re-upserting identical order → empty list (no change)."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         order = _make_order(id="100")
-        mgr.upsert(order)
+        await mgr.upsert(order)
 
-        result = mgr.upsert(order)
+        result = await mgr.upsert(order)
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_upsert_with_duration_json_field(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
+        """Orders with duration (sa_column=JSON) round-trip through DuckDB."""
+        mgr = OrderManager(datastore=datastore)
+        duration = OrderDuration(type="GTC")
+        order = _make_order(id="dur1", duration=duration)
+        await mgr.upsert(order)
+
+        result = await mgr.get("dur1")
+        assert result is not None
+        assert result.duration is not None
+        assert result.duration.type == "GTC"
+        assert result.duration.datetime is None
+
+    @pytest.mark.asyncio
+    async def test_upsert_with_message_json_field(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
+        """Orders with message (sa_column=JSON) round-trip through DuckDB."""
+        mgr = OrderManager(datastore=datastore)
+        msg = OrderOrPositionMessage(
+            type=OrderOrPositionMessageType.WARNING,
+            text="Partially filled",
+        )
+        order = _make_order(id="msg1", message=msg)
+        await mgr.upsert(order)
+
+        result = await mgr.get("msg1")
+        assert result is not None
+        assert result.message is not None
+        assert result.message.text == "Partially filled"
+        assert result.message.type == OrderOrPositionMessageType.WARNING
+
+    @pytest.mark.asyncio
+    async def test_upsert_with_duration_and_message(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
+        """Both JSON fields set simultaneously round-trip correctly."""
+        mgr = OrderManager(datastore=datastore)
+        order = _make_order(
+            id="both1",
+            duration=OrderDuration(type="GTD", datetime=1700000000),
+            message=OrderOrPositionMessage(
+                type=OrderOrPositionMessageType.INFORMATION,
+                text="Order accepted",
+            ),
+        )
+        await mgr.upsert(order)
+
+        result = await mgr.get("both1")
+        assert result is not None
+        assert result.duration is not None
+        assert result.duration.type == "GTD"
+        assert result.duration.datetime == 1700000000
+        assert result.message is not None
+        assert result.message.text == "Order accepted"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -168,9 +292,10 @@ class TestOrderManagerCoreState:
 class TestBracketEnrichment:
     """Gate 1 — bracket enrichment algorithm."""
 
-    def test_parent_then_children(self) -> None:
+    @pytest.mark.asyncio
+    async def test_parent_then_children(self, datastore: "DatastoreInterface") -> None:
         """Parent arrives first, children later → parent re-enriched."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         parent = _make_order(id="100", type=OrderType.MARKET)
         sl_child = _make_order(
             id="101",
@@ -189,18 +314,19 @@ class TestBracketEnrichment:
             parent_type=ParentType.ORDER,
         )
 
-        mgr.upsert(parent)
-        mgr.upsert(sl_child)
-        mgr.upsert(tp_child)
+        await mgr.upsert(parent)
+        await mgr.upsert(sl_child)
+        await mgr.upsert(tp_child)
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         enriched_parent = orders["100"]
         assert enriched_parent.stopLoss == 145.0
         assert enriched_parent.takeProfit == 160.0
 
-    def test_children_then_parent(self) -> None:
+    @pytest.mark.asyncio
+    async def test_children_then_parent(self, datastore: "DatastoreInterface") -> None:
         """Children arrive first → parent enriched immediately on arrival."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         sl_child = _make_order(
             id="101",
             type=OrderType.STOP,
@@ -219,19 +345,20 @@ class TestBracketEnrichment:
         )
         parent = _make_order(id="100", type=OrderType.MARKET)
 
-        mgr.upsert(sl_child)
-        mgr.upsert(tp_child)
-        affected = mgr.upsert(parent)
+        await mgr.upsert(sl_child)
+        await mgr.upsert(tp_child)
+        affected = await mgr.upsert(parent)
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         enriched_parent = orders["100"]
         assert enriched_parent.stopLoss == 145.0
         assert enriched_parent.takeProfit == 160.0
         assert any(o.id == "100" for o in affected)
 
-    def test_partial_bracket(self) -> None:
+    @pytest.mark.asyncio
+    async def test_partial_bracket(self, datastore: "DatastoreInterface") -> None:
         """Only SL child, no TP → parent gets stopLoss only."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         parent = _make_order(id="100", type=OrderType.MARKET)
         sl_child = _make_order(
             id="101",
@@ -242,17 +369,18 @@ class TestBracketEnrichment:
             parent_type=ParentType.ORDER,
         )
 
-        mgr.upsert(parent)
-        mgr.upsert(sl_child)
+        await mgr.upsert(parent)
+        await mgr.upsert(sl_child)
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         enriched = orders["100"]
         assert enriched.stopLoss == 145.0
         assert enriched.takeProfit is None
 
-    def test_full_bracket(self) -> None:
+    @pytest.mark.asyncio
+    async def test_full_bracket(self, datastore: "DatastoreInterface") -> None:
         """Parent + SL + TP children → parent gets both stopLoss and takeProfit."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         parent = _make_order(id="100", type=OrderType.MARKET)
         sl_child = _make_order(
             id="101",
@@ -271,19 +399,20 @@ class TestBracketEnrichment:
             parent_type=ParentType.ORDER,
         )
 
-        mgr.upsert(parent)
-        mgr.upsert(sl_child)
-        mgr.upsert(tp_child)
+        await mgr.upsert(parent)
+        await mgr.upsert(sl_child)
+        await mgr.upsert(tp_child)
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         enriched = orders["100"]
         assert enriched.stopLoss == 145.0
         assert enriched.takeProfit == 160.0
         assert enriched.trailingStopPips is None
 
-    def test_trailing_stop_bracket(self) -> None:
+    @pytest.mark.asyncio
+    async def test_trailing_stop_bracket(self, datastore: "DatastoreInterface") -> None:
         """TRAIL child → parent gets trailingStopPips + TRAILING_STOP stopType."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         parent = _make_order(id="100", type=OrderType.MARKET)
         trail_child = _make_order(
             id="101",
@@ -294,17 +423,20 @@ class TestBracketEnrichment:
             parent_type=ParentType.ORDER,
         )
 
-        mgr.upsert(parent)
-        mgr.upsert(trail_child)
+        await mgr.upsert(parent)
+        await mgr.upsert(trail_child)
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         enriched = orders["100"]
         assert enriched.trailingStopPips == 5.0
         assert enriched.stopType == StopType.TRAILING_STOP
 
-    def test_sync_enriches_all_brackets(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sync_enriches_all_brackets(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """sync() with a full bracket set → parent is enriched."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         parent = _make_order(id="100", type=OrderType.MARKET)
         sl_child = _make_order(
             id="101",
@@ -323,16 +455,19 @@ class TestBracketEnrichment:
             parent_type=ParentType.ORDER,
         )
 
-        mgr.sync([parent, sl_child, tp_child])
+        await mgr.sync([parent, sl_child, tp_child])
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         enriched = orders["100"]
         assert enriched.stopLoss == 145.0
         assert enriched.takeProfit == 160.0
 
-    def test_position_brackets_dont_enrich_orders(self) -> None:
+    @pytest.mark.asyncio
+    async def test_position_brackets_dont_enrich_orders(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """POSITION brackets (parentId=symbol) don't enrich any order."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         parent = _make_order(id="100", type=OrderType.MARKET, symbol="AAPL")
         pos_bracket = _make_order(
             id="201",
@@ -343,9 +478,9 @@ class TestBracketEnrichment:
             parent_type=ParentType.POSITION,
         )
 
-        mgr.sync([parent, pos_bracket])
+        await mgr.sync([parent, pos_bracket])
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         assert (
             orders["100"].stopLoss is None
         ), "Position brackets must not enrich orders"
@@ -359,9 +494,12 @@ class TestBracketEnrichment:
 class TestPositionBracketReclassification:
     """Gate 2 — ORDER → POSITION reclassification."""
 
-    def test_sync_reclassifies_children_of_filled_parent(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sync_reclassifies_children_of_filled_parent(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """sync(): children of FILLED parent → reclassified to POSITION."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         parent = _make_order(
             id="100",
             type=OrderType.MARKET,
@@ -378,16 +516,19 @@ class TestPositionBracketReclassification:
             symbol="NASDAQ:GOOGL",
         )
 
-        mgr.sync([parent, sl_child])
+        await mgr.sync([parent, sl_child])
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         child = orders["101"]
         assert child.parentType == ParentType.POSITION
         assert child.parentId == "NASDAQ:GOOGL"
 
-    def test_sync_reclassifies_children_of_missing_parent(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sync_reclassifies_children_of_missing_parent(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """sync(): children whose parent is not in state → POSITION (cold start)."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         sl_child = _make_order(
             id="101",
             type=OrderType.STOP,
@@ -398,16 +539,19 @@ class TestPositionBracketReclassification:
             symbol="NASDAQ:GOOGL",
         )
 
-        mgr.sync([sl_child])
+        await mgr.sync([sl_child])
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         child = orders["101"]
         assert child.parentType == ParentType.POSITION
         assert child.parentId == "NASDAQ:GOOGL"
 
-    def test_sync_keeps_children_of_working_parent(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sync_keeps_children_of_working_parent(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """sync(): children of WORKING parent → stay ORDER bracket."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         parent = _make_order(
             id="100",
             type=OrderType.MARKET,
@@ -422,16 +566,19 @@ class TestPositionBracketReclassification:
             parent_type=ParentType.ORDER,
         )
 
-        mgr.sync([parent, sl_child])
+        await mgr.sync([parent, sl_child])
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         child = orders["101"]
         assert child.parentType == ParentType.ORDER
         assert child.parentId == "100"
 
-    def test_upsert_reclassifies_when_parent_filled(self) -> None:
+    @pytest.mark.asyncio
+    async def test_upsert_reclassifies_when_parent_filled(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """upsert(): child with FILLED parent in state → reclassified."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         # Parent already in state as FILLED
         parent = _make_order(
             id="100",
@@ -439,7 +586,7 @@ class TestPositionBracketReclassification:
             status=OrderStatus.FILLED,
             symbol="NASDAQ:GOOGL",
         )
-        mgr.upsert(parent)
+        await mgr.upsert(parent)
 
         # Child arrives via WS — parent is FILLED
         sl_child = _make_order(
@@ -451,19 +598,22 @@ class TestPositionBracketReclassification:
             parent_type=ParentType.ORDER,
             symbol="NASDAQ:GOOGL",
         )
-        result = mgr.upsert(sl_child)
+        result = await mgr.upsert(sl_child)
 
         # Child should be reclassified in the result
         child_in_result = next(o for o in result if o.id == "101")
         assert child_in_result.parentType == ParentType.POSITION
         assert child_in_result.parentId == "NASDAQ:GOOGL"
 
-    def test_upsert_keeps_child_when_parent_missing(self) -> None:
+    @pytest.mark.asyncio
+    async def test_upsert_keeps_child_when_parent_missing(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """upsert(): child whose parent isn't in state yet → stays ORDER.
 
         On WS path, missing parent means it hasn't arrived yet.
         """
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         sl_child = _make_order(
             id="101",
             type=OrderType.STOP,
@@ -472,15 +622,18 @@ class TestPositionBracketReclassification:
             parent_id="100",
             parent_type=ParentType.ORDER,
         )
-        result = mgr.upsert(sl_child)
+        result = await mgr.upsert(sl_child)
 
         child_in_result = next(o for o in result if o.id == "101")
         assert child_in_result.parentType == ParentType.ORDER
         assert child_in_result.parentId == "100"
 
-    def test_sync_enriches_working_parent_after_reclassification(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sync_enriches_working_parent_after_reclassification(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """After reclassification, working parent's ORDER children still enrich it."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
         working_parent = _make_order(
             id="200",
             type=OrderType.LIMIT,
@@ -523,9 +676,11 @@ class TestPositionBracketReclassification:
             symbol="NASDAQ:GOOGL",
         )
 
-        mgr.sync([working_parent, sl_working, tp_working, filled_parent, sl_filled])
+        await mgr.sync(
+            [working_parent, sl_working, tp_working, filled_parent, sl_filled]
+        )
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
 
         # Working parent gets enriched from its ORDER children
         assert orders["200"].stopLoss == 304.57
@@ -538,7 +693,10 @@ class TestPositionBracketReclassification:
         assert orders["101"].parentType == ParentType.POSITION
         assert orders["101"].parentId == "NASDAQ:GOOGL"
 
-    def test_upsert_fill_cascade_reclassifies_existing_children(self) -> None:
+    @pytest.mark.asyncio
+    async def test_upsert_fill_cascade_reclassifies_existing_children(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """WS fill cascade: parent WORKING→FILLED, then children re-upserted.
 
         Simulates the real WS flow:
@@ -546,7 +704,7 @@ class TestPositionBracketReclassification:
         2. Parent fills → tracker re-notifies children
         3. OrderManager re-upserts each child → reclassifies to POSITION
         """
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
 
         # Step 1: parent + children arrive as ORDER brackets
         parent = _make_order(
@@ -573,12 +731,12 @@ class TestPositionBracketReclassification:
             parent_type=ParentType.ORDER,
             symbol="NASDAQ:AAPL",
         )
-        mgr.upsert(parent)
-        mgr.upsert(sl_child)
-        mgr.upsert(tp_child)
+        await mgr.upsert(parent)
+        await mgr.upsert(sl_child)
+        await mgr.upsert(tp_child)
 
         # Verify enrichment while parent is WORKING
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         assert orders["100"].stopLoss == 145.0
         assert orders["100"].takeProfit == 160.0
 
@@ -589,11 +747,11 @@ class TestPositionBracketReclassification:
             status=OrderStatus.FILLED,
             symbol="NASDAQ:AAPL",
         )
-        mgr.upsert(filled_parent)
+        await mgr.upsert(filled_parent)
 
         # Step 3: tracker re-notifies children (same child, re-upserted)
-        result_sl = mgr.upsert(sl_child)
-        result_tp = mgr.upsert(tp_child)
+        result_sl = await mgr.upsert(sl_child)
+        result_tp = await mgr.upsert(tp_child)
 
         # Children should be reclassified to POSITION
         sl_result = next(o for o in result_sl if o.id == "101")
@@ -606,13 +764,16 @@ class TestPositionBracketReclassification:
 
         # Filled parent should no longer have bracket enrichment
         # (children are now POSITION, not ORDER)
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         assert orders["100"].stopLoss is None
         assert orders["100"].takeProfit is None
 
-    def test_child_cancelled_removes_enrichment(self) -> None:
+    @pytest.mark.asyncio
+    async def test_child_cancelled_removes_enrichment(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """When a bracket child is cancelled, parent loses that enrichment."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
 
         parent = _make_order(id="100", type=OrderType.MARKET)
         sl_child = _make_order(
@@ -632,12 +793,12 @@ class TestPositionBracketReclassification:
             parent_type=ParentType.ORDER,
         )
 
-        mgr.upsert(parent)
-        mgr.upsert(sl_child)
-        mgr.upsert(tp_child)
+        await mgr.upsert(parent)
+        await mgr.upsert(sl_child)
+        await mgr.upsert(tp_child)
 
         # Verify both enriched
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         assert orders["100"].stopLoss == 145.0
         assert orders["100"].takeProfit == 160.0
 
@@ -651,17 +812,20 @@ class TestPositionBracketReclassification:
             parent_type=ParentType.ORDER,
             status=OrderStatus.CANCELED,
         )
-        mgr.upsert(tp_cancelled)
+        await mgr.upsert(tp_cancelled)
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         assert orders["100"].stopLoss == 145.0, "SL should remain"
         assert (
             orders["100"].takeProfit == 160.0
         ), "Cancelled child still enriches (still ORDER bracket in state)"
 
-    def test_independent_brackets_no_cross_contamination(self) -> None:
+    @pytest.mark.asyncio
+    async def test_independent_brackets_no_cross_contamination(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """Two parent/bracket sets in state don't cross-contaminate."""
-        mgr = OrderManager()
+        mgr = OrderManager(datastore=datastore)
 
         # Bracket set A: AAPL parent at id=100
         parent_a = _make_order(
@@ -691,9 +855,9 @@ class TestPositionBracketReclassification:
             symbol="GOOGL",
         )
 
-        mgr.sync([parent_a, sl_a, parent_b, tp_b])
+        await mgr.sync([parent_a, sl_a, parent_b, tp_b])
 
-        orders = {o.id: o for o in mgr.get_all()}
+        orders = {o.id: o for o in await mgr.get_all()}
         # Parent A: only SL from its child
         assert orders["100"].stopLoss == 145.0
         assert orders["100"].takeProfit is None
@@ -745,10 +909,10 @@ def _make_bracket_set(
     return [parent, sl_child, tp_child]
 
 
-def _make_mock_service() -> MagicMock:
-    """Create a mock BrokerService with OrderManager wired in."""
+async def _make_mock_service(datastore: "DatastoreInterface") -> MagicMock:
+    """Create a mock BrokerService with OrderManager wired to datastore."""
     service = MagicMock()
-    service._order_manager = OrderManager()
+    service._order_manager = OrderManager(datastore=datastore)
     service._topic_to_subscription_id = {}
     return service
 
@@ -757,13 +921,15 @@ class TestBrokerServiceIntegration:
     """Gate 3 — BrokerService routes through OrderManager."""
 
     @pytest.mark.asyncio
-    async def test_get_orders_returns_enriched(self) -> None:
+    async def test_get_orders_returns_enriched(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """get_orders syncs provider state and returns bracket-enriched orders."""
         from trading_api.modules.broker.service import BrokerService
 
         raw_orders = _make_bracket_set()
 
-        service = _make_mock_service()
+        service = await _make_mock_service(datastore)
         service.broker_provider = AsyncMock()
         service.broker_provider.get_orders = AsyncMock(return_value=raw_orders)
 
@@ -776,11 +942,13 @@ class TestBrokerServiceIntegration:
         assert orders["102"].parentId == "100"
 
     @pytest.mark.asyncio
-    async def test_subscribe_orders_enriches_updates(self) -> None:
+    async def test_subscribe_orders_enriches_updates(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """WS callback routes order through OrderManager and emits enriched."""
         from trading_api.modules.broker.service import BrokerService
 
-        service = _make_mock_service()
+        service = await _make_mock_service(datastore)
         service.broker_provider = AsyncMock()
 
         captured_callback: Any | None = None
@@ -847,13 +1015,15 @@ class TestBrokerServiceIntegration:
         assert final_parent.takeProfit == 160.0
 
     @pytest.mark.asyncio
-    async def test_ws_and_rest_consistent(self) -> None:
+    async def test_ws_and_rest_consistent(
+        self, datastore: "DatastoreInterface"
+    ) -> None:
         """WS updates + get_orders return same enrichment for same orders."""
         from trading_api.modules.broker.service import BrokerService
 
         raw_orders = _make_bracket_set()
 
-        service = _make_mock_service()
+        service = await _make_mock_service(datastore)
         service.broker_provider = AsyncMock()
         service.broker_provider.get_orders = AsyncMock(return_value=raw_orders)
 
@@ -913,14 +1083,14 @@ class TestEndToEnd:
             parent_id="E2E-100", sl_id="E2E-101", tp_id="E2E-102"
         )
 
-        broker_service._order_manager.sync(bracket_set)
+        await broker_service._order_manager.sync(bracket_set)
 
-        result = broker_service._order_manager.get_all()
+        result = await broker_service._order_manager.get_all()
         orders = {o.id: o for o in result}
         assert orders["E2E-100"].stopLoss == 145.0
         assert orders["E2E-100"].takeProfit == 160.0
 
-        broker_service._order_manager.clear()
+        await broker_service._order_manager.clear()
 
     @pytest.mark.asyncio
     async def test_place_bracket_order_ws_enriched(
@@ -964,7 +1134,7 @@ class TestEndToEnd:
             )
 
             for order in [parent, sl_child, tp_child]:
-                affected = broker_service._order_manager.upsert(order)
+                affected = await broker_service._order_manager.upsert(order)
                 for enriched in affected:
                     await topic_update(enriched)
 
@@ -974,4 +1144,4 @@ class TestEndToEnd:
             assert final_parent.takeProfit == 160.0
         finally:
             broker_service.remove_topic(topic)
-            broker_service._order_manager.clear()
+            await broker_service._order_manager.clear()

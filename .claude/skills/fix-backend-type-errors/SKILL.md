@@ -109,7 +109,7 @@ Error: [reportAssignmentType] Type "X" is not assignable to "Y"
 
 Root Cause: [Library/framework limitation]
 
-Proposed: __tablename__ = "users"  # pyright: ignore[reportAssignmentType]
+Proposed: __tablename__ = cast(Any, "users")
 
 Validation: Tested — resolves error
 ```

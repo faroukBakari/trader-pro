@@ -91,6 +91,19 @@ def get_order(order_id: OrderId) -> Order:
     ...
 ```
 
+**SQLModel table classes with complex fields:**
+```python
+from sqlalchemy import JSON, Column
+from sqlmodel import Field, SQLModel
+
+class MyTable(SQLModel, table=True):
+    # Pydantic BaseModel fields need sa_column — SQLModel can't auto-map them
+    metadata: Optional[MyPydanticModel] = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+```
+
 **Annotated for validation metadata:**
 ```python
 from typing import Annotated
