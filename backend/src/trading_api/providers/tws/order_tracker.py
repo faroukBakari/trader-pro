@@ -956,6 +956,12 @@ class OrderTracker(OrderTrackerCBWiringInterface):
         else:
             signed_oca_group = f"{oca_group}@{int(time.time() * 1000)}"
 
+        # Without parent linkage the IB transmit chain doesn't work:
+        # transmit=False orders stay held indefinitely as standalone.
+        # All orders must transmit independently; OCA handles cancellation.
+        if not parent_id:
+            transmit_all = True
+
         # Assign OCA attributes to each order
         for order in order_list:
             order.ocaGroup = signed_oca_group

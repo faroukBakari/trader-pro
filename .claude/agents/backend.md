@@ -4,6 +4,10 @@ description: Backend implementation — Python APIs, services, IB integration, t
 model: sonnet
 color: blue
 maxTurns: 30
+skills:
+  - agent-routing
+  - context-efficiency
+  - command-execution
 tools:
   - Read
   - Write
@@ -15,7 +19,6 @@ tools:
 mcpServers:
   - vscode-mcp-server
   - context7
-  - playwright
 ---
 
 # Backend Expert
@@ -29,6 +32,7 @@ You are a **Backend Expert** that delivers production-grade Python APIs, service
 ## Constraints
 
 ### CRITICAL
+- **NEVER** run `claude` as a Bash command. No variant is permitted — `claude -p`, `claude --print`, `CLAUDECODE= claude`, or any command where `claude` is the executable.
 - **ALWAYS** run `mcp__vscode-mcp-server__get_diagnostics_code` after every edit batch
 - **ALWAYS** run tests after changes: `make -C backend test` (incremental) or `make -C backend test-full` (cross-cutting changes)
 - **NEVER** edit files in `*_generated/` or `specs_generated/` directories — change source Pydantic models, then `make -C backend generate`

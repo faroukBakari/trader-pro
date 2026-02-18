@@ -3819,14 +3819,14 @@ def remove_stream(self, business_key: str) -> None:
         loop.call_soon_threadsafe(cleanup_func)
 ```
 
-### OCA Group Submission (Atomic Bracket Orders)
+### OCA Group Submission (Bracket Orders)
 
 Used by: `edit_position_brackets()`, `placeOrderGroup()` with brackets
 
-OCA groups use the **transmit chain pattern** for atomic submission with automatic reconciliation:
+OCA groups use a **transmit strategy** that adapts based on whether a parent order exists:
 
 ```python
-# TWSClient.placeOcaGroup() - Atomic bracket order submission with reconciliation
+# TWSClient.placeOcaGroup() - Bracket order submission with reconciliation
 async def placeOcaGroup(self, contract, children, oca_group, oca_type=1, parent_id=0, timeout=None):
     if not oca_group.startswith("brackets_"):
         raise ValueError("oca_group must start with 'brackets_'")
@@ -3839,12 +3839,19 @@ async def placeOcaGroup(self, contract, children, oca_group, oca_type=1, parent_
     else:
         signed_oca_group = f"{oca_group}@{int(time.time() * 1000)}"
 
+    # Without parent linkage, the IB transmit chain doesn't work:
+    # transmit=False orders stay held indefinitely as standalone.
+    # All orders must transmit independently; OCA handles cancellation.
+    if not parent_id:
+        transmit_all = True
+
     # Assign OCA attributes to all orders
     for order in children:
         order.ocaGroup = signed_oca_group
         order.ocaType = oca_type
 
-    # Transmit chain: staged (transmit=False) for new groups, immediate for updates
+    # Chain pattern: staged (transmit=False) only when parent_id links the chain;
+    # otherwise all orders transmit independently.
     # _submit_order() checks OrderTracker.find_tracked_order() for existing orders
     submit_results = [
         self._submit_order(
@@ -3868,9 +3875,10 @@ async def placeOcaGroup(self, contract, children, oca_group, oca_type=1, parent_
 - **Timestamp Uniqueness**: Appends `@{unix_ms}` to OCA group if new, reuses existing if found via `find_oca_group()`
 - **Reconciliation**: `_submit_order()` checks `OrderTracker.find_tracked_order()` to detect existing orders by orderId first, then OCA group+type+action
 - **Modification Detection**: If existing order found, modifies it instead of creating duplicate
-- **Transmit Strategy**: New OCA groups use chain pattern (`transmit=False` → `True`); existing groups transmit all immediately (`transmit_all=True`)
-- **Atomic Submission**: TWS processes all orders as a unit, preventing partial fills
-- **OCA Enforcement**: When one fills, others are automatically canceled by TWS
+- **Transmit Strategy**: Two modes depending on `parent_id`:
+  - `parent_id > 0` (via `placeOrderGroup`): Uses chain pattern (`transmit=False` → `True` on last child). The IB transmit chain fires atomically because all children share a `parentId`.
+  - `parent_id = 0` (via `edit_position_brackets`): All orders transmit independently (`transmit_all=True`). Without `parentId` linkage, `transmit=False` orders would be held indefinitely as standalone.
+- **OCA Enforcement**: When one order fills, TWS automatically cancels the remaining orders in the group
 
 ---
 

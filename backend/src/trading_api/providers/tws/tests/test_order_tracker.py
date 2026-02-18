@@ -551,3 +551,175 @@ class TestRaiseErrorForOrder:
             message="test",
         )
         assert tracker.raise_error_for_order(42, exc) is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# RCA: transmit flag bug in placeOcaGroup without parentId linkage
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestTransmitFlagOcaGroupBug:
+    """RCA: placeOcaGroup(parent_id=0) assigns transmit=False to non-last
+    children without parentId linkage, breaking IB's atomic submission chain.
+
+    In IB TWS, the transmit chain fires when the last child (transmit=True)
+    triggers submission of all held orders sharing the same parentId.
+    Without parentId (parent_id=0), transmit=False orders are standalone
+    held orders that never get submitted — shown as "Transmit" in TWS UI.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_parent_id_all_children_transmit(self) -> None:
+        """Fix verification: placeOcaGroup(parent_id=0) → ALL children transmit=True.
+
+        Without parentId linkage the IB transmit chain doesn't work, so each
+        order must transmit independently. OCA group handles cancellation.
+        This is the editPositionBrackets path where parent_id defaults to 0.
+        """
+        tracker = _make_tracker()
+        contract = _make_contract(symbol="GOOGL")
+        sl = _make_order(action="SELL", order_type="STP")
+        tp = _make_order(action="SELL", order_type="LMT")
+
+        sent: list[tuple[int, bool, int]] = []  # (order_id, transmit, parentId)
+
+        def capture_and_respond(oid: int, c: Contract, order: Order) -> None:
+            sent.append((oid, order.transmit, order.parentId))
+            tracker.upsert_order(oid, c, order, _make_order_state("Submitted"))
+
+        tracker._OrderTracker__placeOrder = MagicMock(  # type: ignore[attr-defined]
+            side_effect=capture_and_respond
+        )
+
+        await tracker.placeOcaGroup(
+            contract,
+            [sl, tp],
+            oca_group="brackets_NASDAQ:GOOGL",
+            oca_type=1,
+            # parent_id=0 (default) — editPositionBrackets path
+            timeout=2.0,
+        )
+
+        assert len(sent) == 2
+        sl_oid, sl_transmit, sl_parent = sent[0]
+        tp_oid, tp_transmit, tp_parent = sent[1]
+
+        # Fix: both children transmit independently when no parent linkage
+        assert sl_transmit is True, "SL must transmit when parentId=0"
+        assert sl_parent == 0
+        assert tp_transmit is True, "TP must transmit when parentId=0"
+        assert tp_parent == 0
+
+        # No stuck orders
+        stuck = [(oid, t, p) for oid, t, p in sent if not t and p == 0]
+        assert len(stuck) == 0, f"No orders should be stuck: {stuck}"
+
+    @pytest.mark.asyncio
+    async def test_with_parent_id_transmit_chain_is_valid(self) -> None:
+        """Contrast: placeOcaGroup(parent_id=1450) → transmit=False on SL is safe.
+
+        When parent_id > 0, the transmit chain works: TP's transmit=True triggers
+        atomic submission of all orders linked via parentId to the same parent.
+        This is the placeOrderGroup path (initial bracket placement).
+        """
+        tracker = _make_tracker()
+        contract = _make_contract(symbol="GOOGL")
+        sl = _make_order(action="SELL", order_type="STP")
+        tp = _make_order(action="SELL", order_type="LMT")
+
+        sent: list[tuple[int, bool, int]] = []
+
+        def capture_and_respond(oid: int, c: Contract, order: Order) -> None:
+            sent.append((oid, order.transmit, order.parentId))
+            tracker.upsert_order(oid, c, order, _make_order_state("Submitted"))
+
+        tracker._OrderTracker__placeOrder = MagicMock(  # type: ignore[attr-defined]
+            side_effect=capture_and_respond
+        )
+
+        await tracker.placeOcaGroup(
+            contract,
+            [sl, tp],
+            oca_group="brackets_1450",
+            oca_type=1,
+            parent_id=1450,  # Parent linkage exists
+            timeout=2.0,
+        )
+
+        assert len(sent) == 2
+        sl_oid, sl_transmit, sl_parent = sent[0]
+        tp_oid, tp_transmit, tp_parent = sent[1]
+
+        # SL has transmit=False BUT parentId=1450 — chain is valid
+        assert sl_transmit is False
+        assert sl_parent == 1450, "SL linked to parent via parentId"
+
+        # TP triggers the chain
+        assert tp_transmit is True
+        assert tp_parent == 1450
+
+        # No stuck orders: all transmit=False orders have parentId > 0
+        stuck = [(oid, t, p) for oid, t, p in sent if not t and p == 0]
+        assert len(stuck) == 0, "No orders should be stuck when parentId is set"
+
+    @pytest.mark.asyncio
+    async def test_single_child_always_transmits(self) -> None:
+        """SL-only bracket works: single child is always last → transmit=True."""
+        tracker = _make_tracker()
+        contract = _make_contract(symbol="GOOGL")
+        sl = _make_order(action="SELL", order_type="STP")
+
+        sent: list[tuple[int, bool, int]] = []
+
+        def capture_and_respond(oid: int, c: Contract, order: Order) -> None:
+            sent.append((oid, order.transmit, order.parentId))
+            tracker.upsert_order(oid, c, order, _make_order_state("Submitted"))
+
+        tracker._OrderTracker__placeOrder = MagicMock(  # type: ignore[attr-defined]
+            side_effect=capture_and_respond
+        )
+
+        await tracker.placeOcaGroup(
+            contract,
+            [sl],
+            oca_group="brackets_NASDAQ:GOOGL",
+            oca_type=1,
+            # parent_id=0 — same editPositionBrackets path, but SL-only
+            timeout=2.0,
+        )
+
+        assert len(sent) == 1
+        sl_oid, sl_transmit, sl_parent = sent[0]
+
+        # Single child is last → transmit=True, so it works even without parentId
+        assert sl_transmit is True
+
+    @pytest.mark.asyncio
+    async def test_is_active_guard_blocks_oca_group_recovery(self) -> None:
+        """Compounding bug: transmit=False orders are invisible to __find_oca_group.
+
+        After the SL is stored with transmit=False, is_active returns False.
+        Subsequent bracket edits can't find the OCA group → transmit_all stays
+        False → the problem repeats on every retry.
+        """
+        tracker = _make_tracker()
+        contract = _make_contract(symbol="GOOGL")
+
+        # Simulate an existing SL tracked with transmit=False (the stuck state)
+        stuck_sl = _make_order(action="SELL", order_type="STP")
+        stuck_sl.transmit = False
+        stuck_sl.ocaGroup = "brackets_NASDAQ:GOOGL@1739000000000"
+        tracker.upsert_order(
+            orderId=1451,
+            contract=contract,
+            order=stuck_sl,
+            orderState=_make_order_state("PreSubmitted"),
+        )
+
+        tracked = tracker._orders[1451]
+        # transmit=False → is_active=False → invisible to __find_oca_group
+        assert tracked.is_active is False, "transmit=False makes order inactive"
+
+        # __find_oca_group returns None even though the OCA group exists
+        found = tracker._OrderTracker__find_oca_group("brackets_NASDAQ:GOOGL")  # type: ignore[attr-defined]
+        assert found is None, "OCA group not found due to is_active guard"
