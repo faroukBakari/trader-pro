@@ -25,6 +25,7 @@ from trading_api.models import (
 from trading_api.models.common import DatastoreCapabilitySpec, ProviderCapabilitySpec
 from trading_api.models.exceptions import ServiceException, TradingApiException
 from trading_api.models.market import Resolution, TimeRange
+from trading_api.models.market.bars import GetBarsResult
 from trading_api.models.market.quotes import QuoteValues
 from trading_api.modules.datafeed.bar_cache_manager import BarCacheManager
 from trading_api.modules.datafeed.repository import BarRepository
@@ -449,7 +450,7 @@ class DatafeedService(WsRouteService):
         from_time: int,
         to_time: int,
         count_back: Optional[int] = None,
-    ) -> List[Bar]:
+    ) -> GetBarsResult:
         """Get historical bars for a symbol with read-through caching.
 
         Orchestration flow:
@@ -470,7 +471,8 @@ class DatafeedService(WsRouteService):
             count_back: Optional limit on number of bars to return
 
         Returns:
-            List of bars in ascending time order
+            GetBarsResult with bars in ascending time order and optional next_time
+            for gap bridging (set when bars is empty and earlier data exists).
         """
         # Fallback: provider-only mode (no caching)
         if self._cache_manager is None:
@@ -478,9 +480,10 @@ class DatafeedService(WsRouteService):
                 logger.info(
                     f"[CACHE BYPASS] {ticker}/{resolution.value} - no cache manager"
                 )
-            return await self._fetch_bars_from_provider(
+            bars = await self._fetch_bars_from_provider(
                 ticker, resolution, from_time, to_time, count_back
             )
+            return GetBarsResult(bars=bars)
 
         # Read-through cache orchestration
         assert self._bar_repository is not None
@@ -531,7 +534,19 @@ class DatafeedService(WsRouteService):
         ):
             self._last_bars[ticker] = bars[-1]
 
-        return bars
+        # Compute next_time for gap bridging when no bars found
+        next_time: int | None = None
+        if not bars and self._bar_repository:
+            previous_bars = await self._bar_repository.get_bars(
+                symbol=ticker,
+                resolution=resolution,
+                from_time=0,
+                to_time=from_time - 1,
+            )
+            if previous_bars:
+                next_time = previous_bars[-1].time
+
+        return GetBarsResult(bars=bars, next_time=next_time)
 
     async def _process_gap(
         self,

@@ -1246,7 +1246,10 @@ async getBars(symbolInfo: LibrarySymbolInfo, resolution: ResolutionString, perio
       periodParams.from,
       periodParams.to
     )
-    onResult(bars, { noData: bars.length === 0 })
+    onResult(bars, {
+      noData: bars.length === 0,
+      nextTime: response.next_time ? response.next_time / 1000 : undefined,
+    })
   } catch (error) {
     onError(error.message)
   }
