@@ -80,11 +80,23 @@ class GetBarsRequest(BaseModel):
     count_back: Optional[int] = Field(None, description="Count back")
 
 
+class GetBarsResult(BaseModel):
+    """Internal result from service get_bars() with gap-bridging metadata."""
+
+    bars: List[Bar] = Field(default_factory=list)
+    next_time: Optional[int] = Field(
+        None, description="Nearest previous bar timestamp (ms) for gap bridging"
+    )
+
+
 class GetBarsResponse(BaseModel):
     """Response model for getBars endpoint"""
 
     bars: List[Bar] = Field(..., description="Historical bars")
     no_data: bool = Field(default=False, description="No data flag")
+    next_time: Optional[int] = Field(
+        None, description="Nearest previous bar timestamp (ms) for gap bridging"
+    )
 
 
 # Type alias for bars subscription request
@@ -101,6 +113,7 @@ __all__ = [
     "Resolution",
     "Bar",
     "GetBarsRequest",
+    "GetBarsResult",
     "GetBarsResponse",
     "BarsSubscriptionRequest",
 ]

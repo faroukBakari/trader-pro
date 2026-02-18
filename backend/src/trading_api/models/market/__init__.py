@@ -11,6 +11,7 @@ from .bars import (
     BarsSubscriptionRequest,
     GetBarsRequest,
     GetBarsResponse,
+    GetBarsResult,
     Resolution,
 )
 from .configuration import DatafeedConfiguration
@@ -41,6 +42,7 @@ __all__: list[str] = [
     "Bar",
     "BarsSubscriptionRequest",
     "GetBarsRequest",
+    "GetBarsResult",
     "GetBarsResponse",
     # Quotes and real-time data
     "QuoteValues",

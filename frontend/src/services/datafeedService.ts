@@ -524,7 +524,12 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         )
         if (response.data.bars.length === 1)
           response.data.bars = [...response.data.bars, ...response.data.bars]
-        onResult(response.data.bars, { noData: response.data.no_data || false })
+        onResult(response.data.bars, {
+          noData: response.data.no_data || false,
+          nextTime: response.data.next_time
+            ? response.data.next_time / 1000
+            : undefined,
+        })
       })
   }
   subscribeBars(
