@@ -90,39 +90,16 @@ You are a **Frontend Expert & UX Designer** that delivers production-grade Vue 3
 
 ## Architecture Awareness
 
-### Contract-First Pipeline
+Consult `.claude/REFERENCE.md` for the full architecture overview, key file locations, and documentation map.
 
-```
-Backend Pydantic models → OpenAPI/AsyncAPI specs → Generated TypeScript clients → Mappers → Frontend types
-```
-
-- **Generated clients**: `frontend/src/clients_generated/` — NEVER edit, regenerate with `make -C frontend generate`
-  - REST: `trader-client-{module}_v1/` (per backend module)
-  - WebSocket: `ws-types-{module}_v1/` (per backend module)
-- **Mappers**: `frontend/src/plugins/mappers.ts` — the ONLY bridge between backend and frontend types
+**Critical domain knowledge** (not in REFERENCE.md):
+- **TradingView Library**: Trading Terminal fork at `frontend/public/trading_terminal/` (proprietary, obfuscated)
+- **TradingView Widget**: `TraderChartContainer.vue` — main chart container
+- **TV Services**: `brokerTerminalService.ts` (orders, positions) + `datafeedService.ts` (bars, quotes)
+- **TV Types**: `@public/trading_terminal/charting_library` (chart/datafeed) / `@public/trading_terminal` (broker/trading)
+- **TV Critical**: Time in SECONDS not ms; use `omitNullish()` before TV host methods
+- **Service layer**: `frontend/src/services/` uses singleton pattern with reactive refs (NOT Pinia stores)
 - **Path aliases**: `@/*` (src), `@clients/*` (clients_generated), `@public/*` (public)
-
-### Key Directories
-
-```
-frontend/src/
-├── components/          # Vue SFCs
-├── services/            # Business logic (singleton pattern, reactive refs — not Pinia)
-├── plugins/             # Framework adapters (mappers, wsAdapter, wsClientBase)
-├── clients_generated/   # Auto-generated (gitignored)
-├── views/               # Page components
-├── types/               # Frontend-only type definitions
-├── errors/              # AppError hierarchy
-└── router/              # Vue Router with auth guards
-```
-
-### TradingView Integration
-
-- **Library**: Trading Terminal fork at `frontend/public/trading_terminal/` (proprietary, obfuscated)
-- **Widget**: `TraderChartContainer.vue` — main chart container
-- **Services**: `brokerTerminalService.ts` (orders, positions) + `datafeedService.ts` (bars, quotes)
-- **Types**: `@public/trading_terminal/charting_library` (chart/datafeed) / `@public/trading_terminal` (broker/trading)
-- **Critical**: Time in SECONDS not ms; use `omitNullish()` before TV host methods
 
 ### Documentation Map
 
@@ -131,7 +108,7 @@ frontend/src/
 | WebSocket architecture | `frontend/docs/WEBSOCKET-ARCHITECTURE.md` |
 | Broker integration | `frontend/docs/BROKER-INTEGRATION.md` |
 | Error management | `frontend/docs/ERROR-MANAGEMENT.md` |
-| TradingView guides | `frontend/docs/tradingview/` (README, BUNDLE-MAINTENANCE, UI-USAGE-GUIDE) |
+| TradingView guides | `frontend/docs/tradingview/` |
 | Architecture reference | `.claude/REFERENCE.md` |
 
 ---

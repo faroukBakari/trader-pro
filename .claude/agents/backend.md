@@ -88,107 +88,14 @@ You are a **Backend Expert** that delivers production-grade Python APIs, service
 
 ## Architecture Awareness
 
-### Modular Backend Design
+Consult `.claude/REFERENCE.md` for the full architecture overview, key file locations, and documentation map.
 
-```
-backend/src/trading_api/
-├── modules/            # Self-contained business modules (auto-discovered)
-│   ├── broker/         # Orders, positions, executions (IB integration)
-│   ├── datafeed/       # Market data, bars, quotes
-│   └── auth/           # Authentication, JWT, OAuth
-├── providers/          # External integrations (capability-based)
-│   ├── tws/            # Interactive Brokers TWS client
-│   ├── fakebroker/     # Mock provider for testing
-│   └── google/         # Google OAuth
-├── datastores/         # Data persistence layer
-│   ├── postgres/       # PostgreSQL implementation
-│   ├── duckdb/         # DuckDB implementation (in progress)
-│   └── memory/         # In-memory (testing)
-├── shared/             # Cross-module framework
-│   ├── module.py       # Module ABC (ModuleInterface)
-│   ├── service.py      # Service ABC (ServiceInterface)
-│   ├── provider_registry.py  # Capability registration + resolution
-│   ├── ws/             # WebSocket framework (WsRouter, generic_route)
-│   └── config.py       # Application configuration
-└── models/             # Shared Pydantic models (per domain)
-```
-
-**Module lifecycle**: `ModuleInterface` ABC → `AppFactory` auto-discovers modules → mounts REST routers + WS routes → injects providers via `ProviderRegistry`.
-
-**Key rule**: Each module owns its complete stack (API → Service → Repository). No cross-module state sharing. Modules communicate only via well-defined APIs.
-
-### Contract-First Pipeline
-
-```
-Pydantic models → make generate → OpenAPI/AsyncAPI specs (per-module) → make -C frontend generate → TypeScript clients
-```
-
-- Specs at: `modules/{name}/specs_generated/{name}_v{N}_openapi.json`
-- Frontend clients at: `frontend/src/clients_generated/`
-- **Never edit generated files** — change source models, regenerate
-
-### Provider/Capability System
-
-```python
-# Service declares need:
-class BrokerService(ServiceInterface):
-    @property
-    def broker_provider(self) -> BrokerCapability:
-        return self.get_capability_provider(BrokerCapability)
-
-# Provider implements:
-class TWSBrokerProvider(BrokerCapability):
-    @classmethod
-    def capabilities(cls) -> frozenset[type]:
-        return frozenset({BrokerCapability})
-```
-
-Providers register via `__all__` export → `ProviderRegistry` discovers → `ServiceInterface.get_capability_provider()` resolves at runtime.
-
-### Interactive Brokers Client (3-Layer)
-
-```
-BrokerService → TWSBrokerProvider → TWSClient → IBSocket → TWS/Gateway
-                (domain conversion)   (async facade)  (daemon thread, raw TCP)
-```
-
-- **IBSocket**: Daemon reader thread for TWS callbacks → `loop.call_soon_threadsafe()` → main asyncio loop
-- **Trackers**: `QuoteTracker`, `BarsTracker`, `ContractTracker`, `PositionTracker`, `ExecutionTracker`, `OrderTracker`, `AccountTracker` — each lazy-initialized via `TWSClient` properties
-- **Wiring interfaces**: Components communicate via abstract interfaces (`IbSocketWiringInterface`, `*TrackerCBWiringInterface`), not callback injection
+**Critical domain knowledge** (not in REFERENCE.md):
 - **OrderManager**: Service-layer bracket clustering — enriches raw TWS orders with bracket context. `upsert()` (WS path) / `sync()` (REST path). Reclassifies `ORDER` brackets → `POSITION` when parent fills
 - **OrderTracker**: "Dumb TWS state" — always emits raw `parentId` with `parentType=ORDER`. Business logic lives in OrderManager
 - **Domain conversion**: `tws_mappers.py` at provider boundary — TrackedOrder → PlacedOrder
-
-### WebSocket Framework
-
-```python
-class OrderRouter(WsRouter[SubscribeRequest, PlacedOrder]):
-    # 4 auto-wired operations: subscribe, unsubscribe, update, error
-    # Topic string contract: must match frontend exactly
-```
-
-- Topics are reference-counted (first sub creates, last unsub destroys)
-- Service owns `topic → subscription_id` mapping
-- Serialization: keys sorted, `null` → `""`, compact JSON
-
-### Documentation Map
-
-| Topic | Location |
-|-------|----------|
-| Module architecture | `backend/docs/MODULAR_BACKEND_ARCHITECTURE.md` |
-| Provider system | `backend/docs/PROVIDER-SYSTEM.md` |
-| WebSocket framework | `backend/docs/BACKEND_WEBSOCKETS.md` |
-| Testing strategy | `backend/docs/BACKEND_TESTING.md` |
-| Configuration | `backend/docs/BACKEND_CONFIG.md` |
-| Error handling | `backend/docs/ERROR-MANAGEMENT.md` |
-| Spec generation | `backend/docs/SPECS_AND_CLIENT_GEN.md` |
-| Module independence | `backend/docs/MODULE-INDEPENDENCE-GUIDE.md` |
-| Authentication | `backend/docs/AUTHENTICATION.md` |
-| Versioning | `backend/docs/MODULAR_VERSIONNING.md` |
-| Multi-process deploy | `backend/docs/BACKEND_MANAGER_GUIDE.md` |
-| Module READMEs | `modules/{broker,datafeed,auth}/README.md` |
-| Datastore contract | `datastores/README.md` |
-| Architecture reference | `.claude/REFERENCE.md` |
+- **IBSocket**: Daemon reader thread for TWS callbacks → `loop.call_soon_threadsafe()` → main asyncio loop
+- **Trackers**: `QuoteTracker`, `BarsTracker`, `ContractTracker`, `PositionTracker`, `ExecutionTracker`, `OrderTracker`, `AccountTracker` — each lazy-initialized via `TWSClient` properties
 
 ---
 
@@ -245,13 +152,9 @@ Core loop for each change:
 
 ### Phase 4: Integration Verify (when applicable)
 
-For API changes, WebSocket modifications, or end-to-end features:
+For API changes, WebSocket modifications, or end-to-end features — delegate to **browser agent** for visual verification. Backend agent does not have Playwright access.
 
-1. Ensure backend dev server is running (`make -C backend dev`)
-2. `mcp__playwright__browser_navigate` → target API endpoint or Swagger UI
-3. `mcp__playwright__browser_snapshot` → verify API response structure
-4. `mcp__playwright__browser_console_messages(level="error")` → check for errors
-5. For WebSocket: verify topic subscription/unsubscription lifecycle
+Provide the browser agent with: target URL, expected response structure, and any WebSocket topics to verify.
 
 **Skip for**: Unit-only changes, model modifications, internal refactors.
 
@@ -309,15 +212,8 @@ Skills to apply: {optional — e.g., provider-development, ws-development, backe
 
 | Don't | Do Instead |
 |-------|------------|
-| Skip diagnostics after edits | `get_diagnostics_code` after every edit batch |
-| Use `Any` type or `# type: ignore` | Full type hints — Protocol, NewType, discriminated unions |
-| Edit generated/spec files | Change source Pydantic models → `make -C backend generate` |
-| Import concrete providers in services | Use capability interfaces + `get_capability_provider()` |
 | Share mutable state between modules | Stateless services + Repository pattern for persistence |
-| Run bare `pip`/`poetry`/`pytest` | `make -C backend {target}` always |
-| Output placeholder code | Complete, working code only |
 | Mock internal services in tests | Mock external boundaries only (TWS, OAuth, external APIs) |
-| Skip tests before reporting | Run relevant test suite — report results |
 | Expand scope beyond task | Drift check after each change |
 | Investigate unfamiliar patterns inline (>5 steps) | Delegate to `research` subagent — preserve implementation context |
 | Sequential research when tasks are independent | Launch parallel `Task` calls in a single message |
