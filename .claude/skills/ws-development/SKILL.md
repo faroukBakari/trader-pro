@@ -293,133 +293,55 @@ onUnmounted(() => {
 
 ## Error Handling
 
-### Two Error Levels
+| Level | Scope | Example | Handling |
+|-------|-------|---------|----------|
+| Connection | All subscriptions | Network drop, auth failure | `WebSocketBase` auto-reconnect + `onclose` codes |
+| Subscription | Single topic | Invalid params, provider error | `topic_error` callback → frontend `onError` |
 
-| Level | Scope | Keeps Connection? | Handler |
-|-------|-------|-------------------|---------|
-| **Connection-level** | Entire WebSocket | No — closes WS | `FastWSAdapter.handle_exception()` → WS close code |
-| **Subscription-level** | Single topic | Yes (if recoverable) | `topic_error` callback → `SubscriptionError` broadcast |
+**Close codes**: 1000 (normal), 1008 (policy/auth), 1011 (server error), 4000-4999 (app-specific)
 
-### Connection-Level Close Codes
+**Subscription error flow**: Provider error → Service `topic_error(topic, error)` → Router `_emit_error` → Frontend `onError` → Component error state
 
-| Exception Pattern | WS Close Code | Meaning |
-|-------------------|---------------|---------|
-| `*AUTH*` | 1008 | Policy Violation |
-| `*INVALID*`, `*NOT_FOUND*` | 1003 | Unsupported Data |
-| Default | 1011 | Internal Error |
-
-Close reason truncated to 123 bytes per RFC 6455.
-
-### Subscription-Level Error Flow
-
-```
-Provider error
-  → Service wraps: determines recoverable from _RECOVERABLE_ERROR_CODES frozenset
-  → Calls topic_error(exc, recoverable, retry_after_ms)
-    → Router: broadcasts SubscriptionError to all topic clients
-    → Router: if unrecoverable → unsubscribes all clients, discards topic
-  → Frontend: routeErrorMessage() → subscription onError callback
-    → or globalErrorHandler → WebSocketError → error toast
-```
-
-**Recoverability pattern**: Each service defines a `_RECOVERABLE_ERROR_CODES` frozenset. Error codes matching this set get `recoverable=True` + a retry hint. Everything else is unrecoverable and kills the topic.
-
-### Frontend Error Classes
-
-```typescript
-class WebSocketError extends AppError {
-    code: string
-    severity: ErrorSeverity  // 'warning' if recoverable, 'error' if not
-    topic: string
-    recoverable: boolean
-
-    static fromSubscription(error: SubscriptionError, context?): WebSocketError
-}
-```
+**Frontend error classes**: `WsConnectionError` (connection level), `WsSubscriptionError` (topic level) -- both extend `AppError`
 
 ---
 
 ## Frontend Client Architecture
 
-### Three Layers
-
-| Layer | Class | Scope | Key Responsibility |
-|-------|-------|-------|--------------------|
-| **Base** | `WebSocketBase` | Singleton per URL | Raw WS lifecycle, reconnection, message routing |
-| **Route** | `WebSocketClient<P,B,D>` | Per data domain | Listener dedup, mapper, debounced unsubscribe |
-| **Facade** | `WsAdapter` | App singleton | Module URL wiring, exposes typed clients |
-
-### Deduplication by paramsKey
-
-`WebSocketClient` deduplicates subscriptions: multiple listeners with the same serialized params share one backend subscription. The `paramsKey = serializeParams(params)` is the dedup key.
-
-### Debounced Unsubscribe
-
-Some clients (bars, quotes) use debounced unsubscribe (e.g., 500ms) to avoid rapid subscribe/unsubscribe cycles when users switch resolutions or symbols. If a new subscription arrives within the debounce window, the old unsubscribe is cancelled.
-
-### Reconnection
-
-On WebSocket close/error:
-1. `resubscribeAll()` fires after 200ms
-2. Rejects all pending request promises
-3. Re-sends subscribe for every existing subscription
-4. No backend coordination needed — backend treats reconnected client as new
+- **Three layers**: `WsAdapter` (facade, singleton per domain) → `WebSocketClient<TParams, TBackendData, TData>` (per-route, typed) → `WebSocketBase` (singleton per URL, raw WS)
+- **Deduplication**: Multiple subscribers to same params share one backend subscription via `paramsKey`
+- **Debounced unsubscribe**: 2s delay before sending unsubscribe -- prevents flicker on component remount
+- **Reconnection**: `WebSocketBase` auto-reconnects with exponential backoff; re-subscribes active topics on reconnect
 
 ---
 
 ## Testing Patterns
 
 ### Backend WS Tests
-
 ```python
 @pytest.fixture
-def my_module_app():
-    factory = AppFactory()
-    return factory.create_app(enabled_module_names=["my_module"])
+def ws_client(module_app):
+    """Connect to module WS endpoint."""
+    return module_app.test_ws_client("/ws")
 
-async def test_subscribe_and_receive_update(my_module_app):
-    async with my_module_app.test_client() as client:
-        async with client.websocket_connect("/ws") as ws:
-            # Send subscribe
-            await ws.send_json({
-                "type": "my-data.subscribe",
-                "payload": {"sub_id": "test-1", "sub_params": {"symbol": "AAPL"}}
-            })
-            # Receive response
-            response = await ws.receive_json()
-            assert response["payload"]["status"] == "ok"
+async def test_subscribe_sends_update(ws_client, mock_provider):
+    ws_client.send({"type": "subscribe", "payload": {"param": "value"}})
+    response = ws_client.receive()
+    assert response["type"] == "update"
+    assert response["payload"]["field"] == expected
 ```
 
 ### Frontend WS Tests
-
-Use `MockWebSocket` with simulation helpers:
-
 ```typescript
-const mockWs = new MockWebSocket('ws://test/ws')
-mockWs.simulateOpen()
-
-// Simulate subscribe response
-mockWs.simulateMessage({
-    type: 'my-data.subscribe.response',
-    payload: { status: 'ok', sub_id: '...', topic: '...' }
-})
-
-// Simulate data update
-mockWs.simulateMessage({
-    type: 'my-data.update',
-    payload: { topic: '...', payload: { symbol: 'AAPL', value: 150.0 } }
+describe('WsAdapter', () => {
+  it('deduplicates subscriptions by paramsKey', () => {
+    const adapter = new WsAdapter(mockClient)
+    adapter.subscribe('listener1', params, onUpdate1)
+    adapter.subscribe('listener2', params, onUpdate2)
+    expect(mockClient.subscribe).toHaveBeenCalledTimes(1) // single backend sub
+  })
 })
 ```
-
-Test categories to cover:
-- Subscribe success/timeout/error
-- Update routing to correct subscription callback
-- Unsubscribe cleanup + connection close on last subscription
-- Error routing: subscription-level vs global fallback
-- Reconnection and resubscription
-- Listener deduplication (same params → shared subscription)
-- Debounced unsubscribe (cancel on re-subscribe within window)
-- Data mapper application
 
 ---
 
@@ -443,12 +365,12 @@ Test categories to cover:
 
 ## Common Pitfalls
 
-| Pitfall | Symptom | Fix |
-|---------|---------|-----|
-| Topic serialization mismatch | Subscriptions succeed but no updates arrive | Verify `buildTopicParams` and `serializeParams` produce identical strings for same input |
-| Missing `None` → `""` handling | Different topics for `{interval: null}` vs `{interval: ""}` | Both serializers must normalize null/None/undefined to empty string |
-| Forgetting `remove_topic` cleanup | Provider subscriptions leak on last client disconnect | Always pop subscription ID and call provider unsubscribe |
-| Editing generated WS types | Changes overwritten on next generate | Fix the source Pydantic model instead |
-| Unrecoverable error without topic discard | Dead topic persists, no new subscription possible | Ensure `topic_error(exc, recoverable=False)` path discards topic from `_topics` set |
-| Frontend listener ID collision | Updates routed to wrong component | Use component-unique IDs (e.g., component name + instance ID) |
-| Missing onUnmounted unsubscribe | Memory leak, stale callbacks | Always pair subscribe in onMounted with unsubscribe in onUnmounted |
+| Pitfall | Fix |
+|---------|-----|
+| Topic serialization mismatch (subscribe ok, no updates) | Verify `buildTopicParams`/`serializeParams` produce identical strings |
+| Missing `None` → `""` normalization | Both serializers must normalize null/None/undefined to empty string |
+| Forgetting `remove_topic` cleanup | Always pop subscription ID and call provider unsubscribe |
+| Editing generated WS types | Fix the source Pydantic model, then `make generate` |
+| Unrecoverable error without topic discard | `topic_error(recoverable=False)` must discard topic from `_topics` |
+| Frontend listener ID collision | Use component-unique IDs (component name + instance ID) |
+| Missing onUnmounted unsubscribe | Always pair subscribe/unsubscribe in lifecycle hooks |

@@ -239,18 +239,12 @@ Skills to apply: {optional — e.g., tradingview-api, accessibility, ux-design}
 
 | Don't | Do Instead |
 |-------|------------|
-| Edit files in `clients_generated/` | Change backend models → regenerate |
-| Import backend types in services/components | Import via `mappers.ts` only |
-| Use Options API | `<script setup lang="ts">` always |
-| Use `any` type | `unknown` + type guard |
-| Skip diagnostics after edits | `get_diagnostics_code` after every batch |
 | Skip visual verification for UI changes | Auto-detect and verify |
 | Act on Playwright without snapshot | Snapshot first → use refs |
 | Save screenshots to workspace | `/tmp/playwright-captures/` only |
 | Skip state coverage | Loading, empty, error, partial, success |
 | Remove focus outlines | `:focus-visible` with visible indicator |
 | Use color-only meaning | Icon + text + color |
-| Run bare `npm`/`node` | `make -C frontend` targets |
 | Expand scope beyond task | Drift check after each change |
 | Investigate unfamiliar patterns inline (>5 steps) | Delegate to `research` subagent — preserve implementation context |
 | Sequential research when tasks are independent | Launch parallel `Task` calls in a single message |

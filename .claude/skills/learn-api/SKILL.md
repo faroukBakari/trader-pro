@@ -279,39 +279,16 @@ def create_server():
 
 ## Error Catalog
 
-### Startup & Import Errors
-
-| Error | Cause | Solution |
-|-------|-------|---------|
-| `ModuleNotFoundError: No module named 'fastmcp'` | Not installed in active Python environment | `pip install fastmcp` in the correct venv |
-| `ImportError: cannot import name 'MCPType'` | Wrong import path | `from fastmcp.server.openapi import MCPType, RouteMap` |
-| `RuntimeError: No server object found at module level` | Server created inside function, not exported | Assign to module-level variable: `mcp = create_server()` |
-
-### OpenAPI Integration Errors
-
-| Error | Cause | Solution |
-|-------|-------|---------|
-| `httpx.HTTPStatusError: 404` on spec fetch | Wrong spec URL or spec moved | Verify URL; check if spec is at `/openapi.json`, `/openapi.yaml`, `/swagger.json`, or `/api-docs` |
-| `yaml.YAMLError` on spec parse | Spec is JSON but parsed as YAML, or vice versa | Use `resp.json()` for JSON specs, `yaml.safe_load(resp.text)` for YAML |
-| No tools generated from spec | All routes filtered by RouteMap exclusions | Review RouteMap order — first match wins; ensure at least one catch-all `MCPType.TOOL` |
-| Duplicate tool names | Multiple API versions expose same operation names | Exclude duplicate versions: `RouteMap(pattern=r"/v0\.1/.*", mcp_type=MCPType.EXCLUDE)` |
-
-### Runtime Errors
-
-| Error | Cause | Solution |
-|-------|-------|---------|
-| `httpx.HTTPStatusError: 404` on tool call | Path parameter not URL-encoded | Use `quote(param, safe="")` for params with special characters |
-| `httpx.ReadTimeout` | API response too slow | Increase timeout: `httpx.AsyncClient(timeout=60.0)` |
-| `TypeError: 'coroutine' object is not subscriptable` | Missing `await` on async call | Add `await`: `resp = await client.get(...)` |
-| Tool runs but returns empty/null | API returns 204 No Content or empty body | Check `resp.status_code` before `resp.json()` |
-
-### VS Code Configuration Errors
-
-| Error | Cause | Solution |
-|-------|-------|---------|
-| Server doesn't appear in MCP panel | Invalid JSON in `mcp.json` | Validate JSON syntax (watch for trailing commas in JSONC) |
-| `python3: command not found` | Wrong Python command for OS | Use `python` on Windows, `python3` on macOS/Linux |
-| Server starts then immediately exits | Crash during spec fetch (network/timeout) | Test server standalone: `python3 server.py` and check stderr |
+| Category | Error | Fix |
+|----------|-------|-----|
+| Startup | `ModuleNotFoundError: fastmcp` | `pip install fastmcp[openapi]` |
+| Startup | `ImportError: httpx` | `pip install httpx` |
+| OpenAPI | Path params not encoded | Custom tool with manual URL construction |
+| OpenAPI | Missing routes after filter | Check RouteMap keys match spec paths exactly |
+| Runtime | `ConnectionError` on tool call | Verify base URL + API key env var |
+| Runtime | Timeout on large responses | Add `timeout` param to httpx client |
+| VS Code | Server not appearing | Restart VS Code, check `settings.json` MCP config |
+| VS Code | "spawn ENOENT" | Use absolute path to Python in command array |
 
 ---
 
@@ -330,88 +307,9 @@ def create_server():
 
 ## Templates
 
-### Complete OpenAPI-to-MCP Server
-
-```python
-"""
-{Service Name} MCP Server — wraps {API Name} as MCP tools via FastMCP.
-"""
-from __future__ import annotations
-from urllib.parse import quote
-
-import httpx
-import yaml
-from fastmcp import FastMCP
-from fastmcp.server.openapi import MCPType, RouteMap
-
-BASE_URL = "https://api.example.com"
-SPEC_URL = f"{BASE_URL}/openapi.yaml"
-
-
-def _load_spec() -> dict:
-    resp = httpx.get(SPEC_URL, timeout=30.0)
-    resp.raise_for_status()
-    return yaml.safe_load(resp.text)
-
-
-def _create_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(base_url=BASE_URL, timeout=30.0)
-
-
-def create_server() -> FastMCP:
-    spec = _load_spec()
-    client = _create_client()
-
-    server = FastMCP.from_openapi(
-        openapi_spec=spec,
-        client=client,
-        name="{Service Name}",
-        route_maps=[
-            # Exclude auth and write endpoints
-            RouteMap(pattern=r".*/auth/.*", mcp_type=MCPType.EXCLUDE),
-            RouteMap(methods=["PUT", "POST", "DELETE", "PATCH"], mcp_type=MCPType.EXCLUDE),
-            # Exclude endpoints needing custom handling
-            RouteMap(pattern=r".*/items/\{itemId\}.*", mcp_type=MCPType.EXCLUDE),
-            # All remaining GET → tools
-            RouteMap(methods=["GET"], mcp_type=MCPType.TOOL),
-        ],
-    )
-
-    # Custom tools for endpoints needing special handling
-    @server.tool()
-    async def get_item(item_id: str) -> dict:
-        """Get item by ID. IDs may contain slashes (e.g. 'org/name').
-
-        Args:
-            item_id: The item identifier, URL-encoded automatically.
-        """
-        encoded = quote(item_id, safe="")
-        resp = await client.get(f"/v1/items/{encoded}")
-        resp.raise_for_status()
-        return resp.json()
-
-    return server
-
-
-mcp = create_server()
-
-if __name__ == "__main__":
-    mcp.run()
-```
-
-### VS Code MCP Configuration Entry
-
-```jsonc
-{
-    "servers": {
-        "{server-name}": {
-            "type": "stdio",
-            "command": "python3",
-            "args": ["${workspaceFolder}/mcp-servers/{server-name}/server.py"]
-        }
-    }
-}
-```
+Complete server templates and configuration examples: see `./TEMPLATES.md`
+- OpenAPI-to-MCP Server (with RouteMap filtering, custom tools, lifespan)
+- VS Code MCP Configuration Entry
 
 ---
 

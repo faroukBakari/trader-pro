@@ -53,22 +53,7 @@ Methodology for creating, extending, and testing providers within the capability
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Runtime (Request Path)                                               │
-│                                                                      │
-│  API/WS Request                                                      │
-│    → Module Router (API or WS)                                       │
-│      → Service.some_method()                                         │
-│        → self.my_provider  (typed property, O(1) cached lookup)      │
-│          → CapabilityInterface.method()  (abstract contract)         │
-│            → ConcreteProvider.method()  (implementation)             │
-│              → External System (TWS, Google, etc.)                   │
-│                                                                      │
-│  Module NEVER imports Provider directly.                             │
-│  Service knows ONLY the CapabilityInterface.                         │
-└──────────────────────────────────────────────────────────────────────┘
-```
+**Runtime**: API/WS Request → Service → `get_capability_provider(Capability)` → Provider method → External system. Module NEVER imports Provider directly.
 
 ---
 
@@ -381,77 +366,47 @@ Both are fail-fast — the app refuses to start rather than failing at request t
 
 ---
 
-## Internal Provider Architecture (Complex Providers)
+## Internal Provider Architecture
 
-For providers integrating with complex external systems (e.g., TWS/IB Gateway), use **wiring interfaces** for internal dependency inversion:
-
-```
-Provider (Layer 3 — domain adapter)
-  → Client (Layer 2 — protocol client)
-    → Socket/Connection (Layer 1 — transport)
-```
-
-**Wiring interfaces** define callback contracts between layers:
-```python
-class QuoteTrackerCallbackInterface(Protocol):
-    def on_quote_update(self, req_id: int, data: QuoteData) -> None: ...
-    def on_quote_error(self, req_id: int, error: str) -> None: ...
-```
-
-This allows the transport layer (which may run on a daemon thread) to route callbacks to the correct tracker components without tight coupling.
-
-**Guidelines for complex providers**:
-- Layer 3 (Provider) does domain model conversion only — no protocol knowledge
-- Layer 2 (Client) manages request/response correlation and subscription tracking
-- Layer 1 (Socket) handles raw bytes, reconnection, heartbeats
-- Use wiring interfaces between layers for testability
-- Separate client connections when the external system requires distinct sessions
+For complex providers with background threads, connection lifecycle, and event callbacks (e.g., TWS provider), see `providers/tws/` as the reference implementation:
+- Background thread → `loop.call_soon_threadsafe()` → async boundary
+- Wiring interfaces for component communication (not callback injection)
+- Tracker pattern for stateful subscriptions (lazy-init via client properties)
 
 ---
 
 ## Testing Patterns
 
-### Provider Unit Tests (config injection)
-
+### Provider Unit Tests
+Test capability methods with injected config -- mock external boundaries only.
 ```python
 @pytest.fixture
-def provider():
-    return MyProvider(config=MyProviderConfig(host="test", port=9999))
+def provider(mock_config):
+    return MyProvider(config=mock_config)
 
-async def test_get_something(provider):
-    with patch("httpx.AsyncClient.get", return_value=mock_response):
-        result = await provider.get_something("id-1")
-    assert result.id == "id-1"
+def test_capability_method(provider):
+    result = provider.some_method(...)
+    assert result == expected
 ```
 
 ### Registry and Fail-Fast Tests
-
 ```python
-# Registry: discovery + lazy loading
-def test_register(registry):
-    registry.register(MockProvider, "mock")
-    assert "mock" in registry.list_providers()
+def test_provider_discovered():
+    assert MyProvider in ProviderRegistry._providers
 
-async def test_lazy_load(registry):
-    registry.register(MockProvider, "mock")
-    providers = await registry.get_providers([CapabilitySpec(name="auth")])
-    assert len(registry._instances) == 1
-
-# Fail-fast: missing capability at init
-def test_missing_capability():
-    with pytest.raises(CommonException, match="requires capability"):
-        MyService(module_dir=Path("/tmp"), providers=[], datastores=[ds])
+def test_missing_capability_fails_fast():
+    with pytest.raises(CapabilityNotFoundError):
+        service.get_capability_provider(UnprovidedCapability)
 ```
 
 ### Mock Provider for Module Tests
-
 ```python
-class MockBrokerProvider(Provider, BrokerCapability):
+class MockBroker(BrokerCapability):
+    """Minimal mock implementing capability interface for module isolation tests."""
     @classmethod
-    def provider_dir(cls): return Path("/tmp/mock-broker")
-    @classmethod
-    def capabilities(cls): return [CapabilitySpec(name="broker")]
-    # ... implement abstract methods with test doubles
+    def capabilities(cls) -> frozenset[type]:
+        return frozenset({BrokerCapability})
+    # Implement all abstract methods with test doubles
 ```
 
 ---
@@ -478,15 +433,14 @@ class MockBrokerProvider(Provider, BrokerCapability):
 
 ## Common Pitfalls
 
-| Pitfall | Symptom | Fix |
-|---------|---------|-----|
-| `capabilities()` as instance method | Provider never discovered (registry calls classmethod) | Add `@classmethod` decorator |
-| Missing `__all__` export | Provider silently skipped during auto-discovery | Add class name to `__all__` list |
-| Constructor requires arguments | `provider_class()` crash during lazy loading | Make all params optional with defaults |
-| Importing concrete provider in service | Module-provider coupling, can't swap providers | Use capability interface + `get_capability_provider()` |
-| Forgetting `shutdown()` cleanup | Resource leaks on app stop (connections, threads, tasks) | Implement `shutdown()` with cleanup logic |
-| Config without `env_prefix` | All providers share same env vars, collisions | Set unique `env_prefix` in `SettingsConfigDict` |
-| Error code without `PROVIDER_` prefix | Errors misclassified in exception handlers | Follow `PROVIDER_{CAPABILITY}_{TYPE}` convention |
-| Mutable `CapabilitySpec` | Spec modified after creation causes matching bugs | Specs are frozen dataclasses — never mutate |
-| Service classifies all errors as recoverable | Dead subscriptions never cleaned up | Only codes in `_RECOVERABLE_ERROR_CODES` should be recoverable |
-| Testing without config injection | Tests depend on environment variables | Always accept optional `config` param in `__init__` |
+| Pitfall | Fix |
+|---------|-----|
+| `capabilities()` as instance method | Add `@classmethod` -- registry calls it without instantiation |
+| Missing `__all__` export | Add class to `__all__` -- auto-discovery scans it |
+| Constructor requires arguments | Make all params optional -- registry calls `cls()` with no args |
+| Importing concrete provider in service | Use capability interface + `get_capability_provider()` |
+| No `shutdown()` cleanup | Implement cleanup for connections, threads, tasks |
+| Config without `env_prefix` | Set unique `env_prefix` to avoid env var collisions |
+| Error code without `PROVIDER_` prefix | Follow `PROVIDER_{CAPABILITY}_{TYPE}` convention |
+| All errors classified as recoverable | Only `_RECOVERABLE_ERROR_CODES` entries should be recoverable |
+| Testing without config injection | Accept optional `config` param in `__init__` |
