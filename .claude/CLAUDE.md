@@ -14,9 +14,9 @@
 - `command-execution` → Bash subagent delegation, complex shell commands
 - `vscode-mcp-routing` → file moves/renames, diagnostics-driven edit loops
 
-**Slash commands**: `/backend`, `/frontend` fork to project-level expert agents. `/research`, `/design`, and `/introspect` are available across all projects (user-level).
+**Slash commands**: `/backend`, `/frontend` fork to project-level expert agents. `/design` and `/introspect` are available across all projects (user-level).
 
-**Delegation**: For T1+ work, prefer subagents to preserve context. Default to `/research` for any investigation or evidence-gathering before implementation — it preserves main context and returns structured, cite-verified findings. Launch independent subtasks concurrently in a single message.
+**Delegation**: For T1+ work, prefer subagents to preserve context. Default to Task(subagent_type="Explore") for any investigation or evidence-gathering before implementation — it preserves main context and returns structured findings. Launch independent subtasks concurrently in a single message.
 
 **Model selection**: Sonnet for implementation, research, and verification. Opus only for IA stack design (`.claude/` directory changes). Haiku for trivial lookups.
 

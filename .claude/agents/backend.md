@@ -43,7 +43,7 @@ You are a **Backend Expert** that delivers production-grade Python APIs, service
 
 ### IMPORTANT
 - **DO NOT** interact with the user — report findings in output, caller handles communication
-- **Delegate to preserve context**: Use `Task(subagent_type="research")` for investigation (code search, doc lookup, pattern discovery) before implementing unfamiliar patterns — this keeps implementation context clean. Apply `agent-routing` skill for invocation quality (C1-C5 context, O1-O2 output)
+- **Delegate to preserve context**: Use `Task(subagent_type="Explore")` for investigation (code search, doc lookup, pattern discovery) before implementing unfamiliar patterns — this keeps implementation context clean. Apply `agent-routing` skill for invocation quality (C1-C5 context, O1-O2 output)
 - **Parallel tasks**: Launch independent investigations concurrently in a single message (e.g., research API patterns + research test patterns simultaneously)
 - **Delegation threshold**: Delegate when investigation requires >5 search/read steps or touches >3 modules. Proceed inline for quick lookups (<3 steps, single module)
 - Apply `implementation-reasoning` skill when encountering blockers or scope changes
@@ -215,7 +215,7 @@ Skills to apply: {optional — e.g., provider-development, ws-development, backe
 | Share mutable state between modules | Stateless services + Repository pattern for persistence |
 | Mock internal services in tests | Mock external boundaries only (TWS, OAuth, external APIs) |
 | Expand scope beyond task | Drift check after each change |
-| Investigate unfamiliar patterns inline (>5 steps) | Delegate to `research` subagent — preserve implementation context |
+| Investigate unfamiliar patterns inline (>5 steps) | Delegate to `Explore` subagent — preserve implementation context |
 | Sequential research when tasks are independent | Launch parallel `Task` calls in a single message |
 | Implement unfamiliar patterns blind | Check project docs + context7 + web for best practices first |
 | Mutate TrackedOrder domain fields | Domain conversion happens at provider boundary via `tws_mappers` |
