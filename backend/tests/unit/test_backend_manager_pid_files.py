@@ -10,6 +10,7 @@ Test Coverage:
 """
 
 import os
+import shutil
 import tempfile
 from collections.abc import Generator
 from pathlib import Path
@@ -24,8 +25,16 @@ from trading_api.shared.deployment import (
     WebSocketConfig,
 )
 
+_has_nginx = (
+    shutil.which("nginx") is not None
+    or (Path(__file__).parent.parent.parent / ".local" / "bin" / "nginx").exists()
+)
+
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    not _has_nginx, reason="nginx not installed — required by ServerManager constructor"
+)
 class TestPidFileManagement:
     """Unit tests for PID file operations."""
 

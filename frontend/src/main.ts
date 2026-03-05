@@ -12,9 +12,13 @@ import router from './router'
 const app = createApp(App)
 
 app.use(router)
-app.use(GoogleSignInPlugin, {
-  clientId: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-})
+
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+if (googleClientId) {
+  app.use(GoogleSignInPlugin, { clientId: googleClientId })
+} else {
+  console.warn('[Auth] VITE_GOOGLE_CLIENT_ID not set — Google Sign-In disabled. See .env.local.template')
+}
 
 // Global Vue error handler - catches errors in component lifecycle, watchers, etc.
 app.config.errorHandler = (err) => {

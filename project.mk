@@ -63,24 +63,52 @@ install-hooks:
 install:
 	@echo "Installing all project dependencies..."
 	@echo ""
-	@echo "[1/2] Installing backend dependencies..."
+	@echo "[1/5] Checking environment file..."
+	@echo "========================================"
+	@if [ ! -f .env ]; then \
+		echo "Creating .env from .env.example..."; \
+		cp .env.example .env; \
+		echo "✓ .env created — review and adjust values if needed"; \
+	else \
+		echo "✓ .env already exists"; \
+	fi
+	@echo ""
+	@echo "[2/5] Installing backend dependencies..."
 	@echo "========================================"
 	make -C backend install
 	@echo ""
-	@echo "[2/2] Installing frontend dependencies..."
+	@echo "[3/5] Installing frontend dependencies..."
 	@echo "========================================="
 	make -C frontend install
 	@echo ""
-	@echo "[3/3] Installing Git hooks..."
+	@echo "[4/5] Installing Git hooks..."
 	@echo "========================================"
 	@$(MAKE) install-hooks
 	@echo ""
+	@echo "[5/5] Generating API specs and clients..."
+	@echo "========================================"
+	@$(MAKE) generate
+	@echo ""
 	@echo "✓ All dependencies installed successfully!"
 	@echo ""
+	@echo "Secrets setup (requires 1Password CLI):"
+	@echo "  1. Sign in:  eval \$$(op signin)"
+	@echo "  2. Inject:   op inject -i .env.local.template -o .env.local"
+	@echo "  This resolves Google OAuth credentials (and future secrets) from 1Password."
+	@echo "  Skip this step if you don't need Google Sign-In during development."
+	@echo ""
+	@if [ -f .env.local ]; then \
+		echo "✓ .env.local already exists (secrets configured)"; \
+	else \
+		echo "⚠  .env.local not found — Google Sign-In will be disabled until secrets are configured."; \
+	fi
+	@echo ""
 	@echo "Next steps:"
-	@echo "  make dev-backend    # Start backend server (port 8000)"
-	@echo "  make dev-frontend   # Start frontend server (port 5173)"
-	@echo "  make dev-fullstack  # Start both servers"
+	@echo "  make dev-fullstack  # Start backend + frontend (recommended)"
+	@echo "  make dev-backend    # Start backend server only (port $(BACKEND_PORT))"
+	@echo "  make dev-frontend   # Start frontend server only (port $(FRONTEND_PORT))"
+	@echo ""
+	@echo "Note: First run of 'make dev-backend' will start PostgreSQL and generate JWT keys."
 
 # Development servers
 dev-backend:

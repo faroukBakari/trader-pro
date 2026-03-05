@@ -30,6 +30,10 @@
 
 **Tooling**: Use `Read`/`Write`/`Edit`/`Glob`/`Grep` over Bash equivalents. Use VS Code MCP tools (`move_file_code`, `rename_file_code`, `get_diagnostics_code`) for workspace-aware operations. Use env wrappers (`poetry run`, `make` targets) — never bare `pip`/`npm`/`python`.
 
+**Python env**: This project uses **Poetry**, not uv. See `.claude/rules/python-env.md` for the full override. The user-level `uv-python-isolation` rule does not apply to any Python path in this repo.
+
+**Node env**: This project uses **npm** (not pnpm) and nvm-compatible `.nvmrc` (fnm reads it natively). See `.claude/rules/node-env.md`. The user-level `node-isolation` rule does not apply.
+
 **Quality gates**:
 - Code → run type-check (`make -C backend type-check` for Python, `make -C frontend type-check` for TypeScript) + run tests (`make -C backend test` or `make -C frontend test`). Type-check is recommended for all code changes; tests are mandatory.
 - New features / breaking refactors → run coverage (`make -C backend test-cov`) and check for gaps. Update relevant docs (module READMEs, `datastores/README.md`, architecture docs in `backend/docs/`).

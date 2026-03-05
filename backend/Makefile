@@ -189,7 +189,8 @@ install:
 			echo "Note: Make sure ~/.local/bin is in your PATH"; \
 		else \
 			echo "Installing Poetry via official installer..."; \
-			curl -sSL https://install.python-poetry.org | python3 -; \
+			POETRY_PYTHON=$$(command -v /usr/bin/python3 || command -v python3); \
+			curl -sSL https://install.python-poetry.org | "$$POETRY_PYTHON" -; \
 			echo "Note: Make sure ~/.local/bin is in your PATH"; \
 		fi; \
 		if ! command -v poetry >/dev/null 2>&1; then \
@@ -353,25 +354,16 @@ install:
 	@echo "[3/4] Regenerating TWS protobufs..."
 	@bash ./scripts/regenerate_tws_protobufs.sh
 	@echo ""
-	@echo "[4/4] Checking nginx (required for multi-process mode)..."
+	@echo "[4/4] Checking nginx (required for multi-process mode + tests)..."
 	@if [ -f ".local/bin/nginx" ]; then \
 		echo "✅ Local nginx available: $$(.local/bin/nginx -v 2>&1)"; \
 	elif command -v nginx >/dev/null 2>&1; then \
 		echo "✅ System nginx available: $$(nginx -v 2>&1)"; \
 	else \
-		echo "⚠️  nginx not found (optional - only needed for multi-process mode)"; \
-		echo ""; \
-		echo "Would you like to install standalone nginx? [y/N]"; \
-		read -r REPLY; \
-		if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
-			echo "Installing standalone nginx binary..."; \
-			poetry run python scripts/install_nginx.py && \
-			echo "✅ nginx installed successfully!"; \
-		else \
-			echo "Skipping nginx installation. You can install it later with:"; \
-			echo "  poetry run python scripts/install_nginx.py"; \
-			echo "  OR: sudo apt install nginx"; \
-		fi; \
+		echo "⚠️  nginx not found. Installing standalone binary..."; \
+		poetry run python scripts/install_nginx.py && \
+		echo "✅ nginx installed successfully!" || \
+		echo "⚠️  nginx install failed (optional — only needed for multi-process mode and some tests)"; \
 	fi
 	@echo ""
 	@echo "✅ Backend installation complete!"
@@ -391,7 +383,8 @@ install-ci:
 			pip3 install --user poetry; \
 		else \
 			echo "Installing Poetry via official installer..."; \
-			curl -sSL https://install.python-poetry.org | python3 -; \
+			POETRY_PYTHON=$$(command -v /usr/bin/python3 || command -v python3); \
+			curl -sSL https://install.python-poetry.org | "$$POETRY_PYTHON" -; \
 		fi; \
 		if ! command -v poetry >/dev/null 2>&1; then \
 			echo "❌ Poetry installation failed"; \

@@ -7,6 +7,7 @@ import { GoogleSignInButton, type CredentialResponse } from 'vue3-google-signin'
 const authService = useAuthService()
 const router = useRouter()
 const showGoogleButton = ref(true)
+const googleEnabled = !!import.meta.env.VITE_GOOGLE_CLIENT_ID
 
 onMounted(async () => {
   const isAuthenticated = await authService.checkAuthStatus()
@@ -65,7 +66,7 @@ function handleGoogleError() {
 
         <div class="login-button-container">
           <GoogleSignInButton
-            v-if="showGoogleButton && !authService.isLoading.value"
+            v-if="googleEnabled && showGoogleButton && !authService.isLoading.value"
             type="standard"
             theme="outline"
             size="large"
@@ -76,6 +77,11 @@ function handleGoogleError() {
             @success="handleGoogleSignIn"
             @error="handleGoogleError"
           />
+
+          <div v-if="!googleEnabled" class="auth-disabled-message">
+            Google Sign-In is not configured.<br>
+            Set <code>VITE_GOOGLE_CLIENT_ID</code> in <code>.env.local</code> to enable.
+          </div>
 
           <div v-if="authService.isLoading.value" class="loading-state">
             <div class="spinner" aria-label="Loading"></div>
@@ -211,6 +217,24 @@ function handleGoogleError() {
   color: #718096;
   font-size: 0.875rem;
   margin: 0;
+}
+
+.auth-disabled-message {
+  text-align: center;
+  color: #718096;
+  font-size: 0.875rem;
+  padding: 1rem;
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  line-height: 1.6;
+}
+
+.auth-disabled-message code {
+  background: #edf2f7;
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  font-size: 0.8125rem;
 }
 
 .login-footer {
